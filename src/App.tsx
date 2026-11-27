@@ -35,6 +35,8 @@ import {
   Trash2,
   Upload,
   UserPlus,
+  UserRound,
+  UserRoundX,
   Wrench,
   X,
 } from 'lucide-react';
@@ -80,6 +82,7 @@ import {
 import { WorkflowTemplateCanvas } from './components/WorkflowTemplateCanvas';
 import { WorkspacePane } from './components/WorkspacePane';
 import { EndfieldAmbientStage } from './components/EndfieldAmbientStage';
+import { RinneMascot, RINNE_LINES, type RinneState } from './components/RinneMascot';
 import {
   TroubleshootModal,
   buildStandbyPrompt,
@@ -113,6 +116,9 @@ export const App: React.FC = () => {
     const saved = localStorage.getItem('ag_chat_theme');
     return saved === 'dark' ? 'dark' : 'light';
   });
+
+  // Mascot (Rinne) visibility, remembered across sessions
+  const [showRinne, setShowRinne] = useState(() => localStorage.getItem('ag_rinne_visible') !== '0');
 
   const [workflow, setWorkflow] = useState<WorkflowDefinition | null>(null);
   const [workflowTemplates, setWorkflowTemplates] = useState<WorkflowPresetTemplate[]>([]);
@@ -221,6 +227,10 @@ export const App: React.FC = () => {
     document.documentElement.setAttribute('data-theme', theme);
     localStorage.setItem('ag_chat_theme', theme);
   }, [theme]);
+
+  useEffect(() => {
+    localStorage.setItem('ag_rinne_visible', showRinne ? '1' : '0');
+  }, [showRinne]);
 
   const flash = useCallback((msg: string) => {
     setToast(msg);
@@ -1448,6 +1458,26 @@ export const App: React.FC = () => {
   const idleCount = activeMembers.filter((m) => m.presence === 'idle').length;
   const offlineCount = sidebarMembers.filter((m) => m.presence === 'offline').length;
 
+  // Mascot mood follows the room: approval > error > working > nobody online > listening > done > idle
+  const lastRealMessage = realMessages[realMessages.length - 1];
+  const rinneState: RinneState = isWaitingApproval
+    ? 'approval'
+    : activeRun?.status === 'failed' || lastRealMessage?.status === 'error'
+      ? 'error'
+      : isRunning || workingCount > 0
+        ? 'working'
+        : totalConnectedCount === 0
+          ? 'sleep'
+          : activeMembers.some((m) => m.listening)
+            ? 'listening'
+            : activeRun?.status === 'completed'
+              ? 'done'
+              : 'idle';
+  const rinneLine =
+    rinneState === 'working' && workingCount > 0
+      ? `正在协作中…（${workingCount} 位成员工作中）`
+      : RINNE_LINES[rinneState];
+
   return (
     <div className="studio-app">
       {/* ===== Left Collapsible, Resizable, Unified-Scroll Sidebar ===== */}
@@ -1980,6 +2010,17 @@ export const App: React.FC = () => {
         <EndfieldAmbientStage
           compact={showCanvas || showProjectWorkspace}
           isBusy={isRunning || workingCount > 0}
+          reading={!isFreshRoom}
+          quietBottom={!isFreshRoom && showRinne}
+          mood={
+            rinneState === 'approval'
+              ? 'approval'
+              : rinneState === 'error'
+                ? 'error'
+                : rinneState === 'working'
+                  ? 'busy'
+                  : 'idle'
+          }
         />
 
         <header className="studio-topbar">
@@ -2037,6 +2078,19 @@ export const App: React.FC = () => {
               onClick={() => setTheme((t) => (t === 'dark' ? 'light' : 'dark'))}
             >
               {theme === 'dark' ? <Sun size={15} /> : <Moon size={15} />}
+            </button>
+
+            <button
+              type="button"
+              className={`studio-icon-btn ${showRinne ? 'active' : ''}`}
+              title={showRinne ? '隐藏看板娘' : '显示看板娘'}
+              aria-pressed={showRinne}
+              onClick={() => {
+                setShowRinne((v) => !v);
+                flash(showRinne ? '看板娘已隐藏' : '看板娘已显示');
+              }}
+            >
+              {showRinne ? <UserRound size={15} /> : <UserRoundX size={15} />}
             </button>
 
             <button
@@ -2105,7 +2159,8 @@ export const App: React.FC = () => {
         <div className="studio-feed">
           <div className="studio-feed-inner">
             {isFreshRoom ? (
-              <div className="studio-hero ef-hero">
+              <div className={`studio-hero ef-hero ${showRinne ? 'has-rinne' : ''}`}>
+                {showRinne && <RinneMascot variant="hero" />}
                 {/* TIMELESS NASCENCE ∞ Inspired Event-Horizon & Orbital Wireframe Backdrop */}
                 <svg
                   className="ef-hero-orbit-svg"
@@ -2114,12 +2169,6 @@ export const App: React.FC = () => {
                   aria-hidden="true"
                 >
                   <defs>
-                    <radialGradient id="efHorizonGlow" cx="50%" cy="50%" r="50%">
-                      <stop offset="0%" stopColor="#1e1b4b" stopOpacity="0.92" />
-                      <stop offset="45%" stopColor="#3b82f6" stopOpacity="0.45" />
-                      <stop offset="72%" stopColor="#818cf8" stopOpacity="0.18" />
-                      <stop offset="100%" stopColor="#6366f1" stopOpacity="0" />
-                    </radialGradient>
                     <linearGradient id="efRibbonGrad" x1="0%" y1="0%" x2="100%" y2="0%">
                       <stop offset="0%" stopColor="#3b82f6" stopOpacity="0.06" />
                       <stop offset="50%" stopColor="#3b82f6" stopOpacity="0.28" />
@@ -2139,42 +2188,6 @@ export const App: React.FC = () => {
                     stroke="url(#efRibbonGrad)"
                     strokeWidth="0.9"
                     strokeDasharray="4 4"
-                  />
-                  {/* Upper-right Event-Horizon Sphere + Concentric Orbital Rings */}
-                  <g className="ef-orb-pulse">
-                    <circle cx="600" cy="76" r="64" fill="url(#efHorizonGlow)" />
-                    <circle cx="600" cy="76" r="22" fill="#0f172a" stroke="#60a5fa" strokeWidth="1.5" />
-                  </g>
-                  <g className="ef-orbit-spin">
-                    <ellipse
-                      cx="600"
-                      cy="76"
-                      rx="54"
-                      ry="18"
-                      fill="none"
-                      stroke="#60a5fa"
-                      strokeOpacity="0.45"
-                      strokeWidth="1"
-                      transform="rotate(-22 600 76)"
-                    />
-                    <ellipse
-                      cx="600"
-                      cy="76"
-                      rx="42"
-                      ry="42"
-                      fill="none"
-                      stroke="#818cf8"
-                      strokeOpacity="0.3"
-                      strokeWidth="0.8"
-                      strokeDasharray="3 5"
-                    />
-                    <circle cx="642" cy="76" r="2.5" fill="#facc15" />
-                  </g>
-                  {/* Four-point star flare */}
-                  <path
-                    d="M 556 42 L 558 50 L 566 52 L 558 54 L 556 62 L 554 54 L 546 52 L 554 50 Z"
-                    fill="#facc15"
-                    opacity="0.9"
                   />
                 </svg>
 
@@ -2568,6 +2581,7 @@ export const App: React.FC = () => {
         {/* Floating Pill Composer (Claude / Codex / Antigravity signature!) */}
         <footer className="studio-composer-dock">
           <div className="studio-composer-card">
+            {showRinne && !isFreshRoom && <RinneMascot variant="dock" state={rinneState} line={rinneLine} />}
             <input
               ref={composerFileInputRef}
               type="file"

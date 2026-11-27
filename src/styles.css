@@ -1,7 +1,7 @@
 /* ===== Arknights: Endfield // TIMELESS NASCENCE Inspired Technical HUD Theme ===== */
 :root,
 [data-theme='light'] {
-  --bg-canvas: #f2f4f7;
+  --bg-canvas: #eef1f6;
   --bg-sidebar: #ebedf2;
   --bg-elevated: #ffffff;
   --bg-subtle: #e9ecf1;
@@ -20,9 +20,9 @@
   --code-block-text: #eef2f8;
   --ef-yellow: #eab308;
   --ef-yellow-bright: #facc15;
-  --ef-blue: #2563eb;
+  --ef-blue: #2a4de6;
   --ef-cyan: #0ea5e9;
-  --ef-violet: #6366f1;
+  --ef-violet: #6a5cf6;
   --ef-grid-line: rgba(16, 19, 25, 0.048);
   --ef-grid-major: rgba(37, 99, 235, 0.055);
   --shadow-composer: 0 10px 30px rgba(15, 23, 42, 0.08), 0 1px 2px rgba(15, 23, 42, 0.05);
@@ -4888,15 +4888,17 @@ body,
   width: 100%;
   border: 1px solid var(--border);
   border-radius: 4px;
-  background: linear-gradient(155deg, rgba(255, 255, 255, 0.92), rgba(242, 244, 247, 0.86));
+  background: linear-gradient(155deg, rgba(255, 255, 255, 0.95), rgba(244, 246, 250, 0.9));
+  -webkit-backdrop-filter: blur(10px) saturate(1.2);
+  backdrop-filter: blur(10px) saturate(1.2);
   overflow: hidden;
   text-align: left;
   align-items: flex-start;
-  box-shadow: 0 12px 36px rgba(15, 23, 42, 0.05);
+  box-shadow: 0 12px 36px rgba(15, 23, 42, 0.06);
 }
 
 [data-theme='dark'] .studio-hero.ef-hero {
-  background: linear-gradient(155deg, rgba(18, 22, 32, 0.94), rgba(11, 13, 19, 0.9));
+  background: linear-gradient(155deg, rgba(18, 22, 32, 0.95), rgba(11, 13, 19, 0.92));
 }
 
 /* Technical corner brackets on Hero */
@@ -5506,7 +5508,27 @@ body,
   z-index: 2;
 }
 
-/* Layer 1: Architectural Oversized Background Watermark + Sweeping Glitch-Bars */
+/* Layer 1: oversized hollow halftone typography + black data bars */
+.ef-ambient-stage {
+  --ef-wm-stroke: rgba(30, 41, 59, 0.26);
+  --ef-wm-dot: rgba(30, 41, 59, 0.2);
+  --ef-bar: #0d0f14;
+  --ef-bar-dash: #f8fafc;
+  --ef-lemon: #e9d66b;
+  --ef-cobalt: #2a4de6;
+  --ef-micro: #5b6b8c;
+}
+
+[data-theme='dark'] .ef-ambient-stage {
+  --ef-wm-stroke: rgba(203, 213, 225, 0.16);
+  --ef-wm-dot: rgba(203, 213, 225, 0.12);
+  --ef-bar: #dfe5ef;
+  --ef-bar-dash: #0b0d13;
+  --ef-lemon: #f4e27a;
+  --ef-cobalt: #5b7bff;
+  --ef-micro: #8b96b0;
+}
+
 .ef-bg-watermark {
   position: absolute;
   inset: 0;
@@ -5515,38 +5537,91 @@ body,
   overflow: hidden;
 }
 
-.ef-wm-top {
+.ef-wm-top,
+.ef-wm-bottom {
   position: absolute;
-  top: 52px;
-  left: 22px;
   display: inline-block;
-  overflow: hidden;
+}
+
+.ef-wm-top {
+  top: 34px;
+  left: 18px;
 }
 
 .ef-wm-bottom {
-  position: absolute;
-  bottom: 132px;
-  left: 24px;
-  display: inline-block;
-  overflow: hidden;
+  bottom: 118px;
+  left: 20px;
 }
 
 .ef-wm-word {
-  font-family: 'Segoe UI', -apple-system, sans-serif;
-  font-size: clamp(46px, 7.2vw, 88px);
-  font-weight: 900;
-  letter-spacing: 0.1em;
-  line-height: 0.94;
-  color: rgba(16, 19, 25, 0.048);
   display: block;
+  font-family: 'Bahnschrift', 'DIN Alternate', 'Segoe UI', -apple-system, sans-serif;
+  font-size: clamp(64px, 9.6vw, 156px);
+  font-weight: 700;
+  letter-spacing: 0.035em;
+  line-height: 0.92;
+  color: transparent;
+  -webkit-text-stroke: 1.4px var(--ef-wm-stroke);
+  background-image: radial-gradient(var(--ef-wm-dot) 0.9px, transparent 1.2px);
+  background-size: 4px 4px;
+  -webkit-background-clip: text;
+  background-clip: text;
 }
 
-[data-theme='dark'] .ef-wm-word {
-  color: rgba(226, 232, 240, 0.048);
+/* Black bar striking through the lower third of the word, with white dash segments */
+.ef-wm-bar {
+  position: absolute;
+  left: 0.12em;
+  height: 15px;
+  background: var(--ef-bar);
+  font-size: clamp(64px, 9.6vw, 156px);
+}
+
+.ef-wm-bar::before {
+  content: '';
+  position: absolute;
+  left: 10px;
+  right: 10px;
+  top: 6px;
+  height: 3px;
+  background: repeating-linear-gradient(90deg, var(--ef-bar-dash) 0 26px, transparent 26px 40px, var(--ef-bar-dash) 40px 48px, transparent 48px 62px);
+}
+
+.ef-wm-bar-top {
+  top: 0.68em;
+  width: 2.8em;
+}
+
+.ef-wm-bar-bottom {
+  top: 0.7em;
+  left: 2.1em;
+  width: 2.6em;
+}
+
+.ef-wm-label {
+  position: absolute;
+  left: calc(100% + 6px);
+  top: 0;
+  height: 15px;
+  padding: 0 8px;
+  display: inline-flex;
+  align-items: center;
+  white-space: nowrap;
+  background: var(--ef-bar);
+  color: var(--ef-lemon);
+  font-family: 'Cascadia Code', 'Consolas', monospace;
+  font-size: 9px;
+  font-weight: 700;
+  letter-spacing: 0.14em;
+}
+
+.ef-wm-label.is-ghost {
+  background: transparent;
+  color: var(--ef-micro);
+  padding-left: 2px;
 }
 
 .ef-wm-glitch-a,
-.ef-wm-glitch-b,
 .ef-wm-glitch-c {
   position: absolute;
   left: 0;
@@ -5554,27 +5629,32 @@ body,
 }
 
 .ef-wm-glitch-a {
-  top: 26%;
+  top: 30%;
   width: 58%;
-  height: 7px;
-  background: linear-gradient(90deg, transparent, rgba(17, 19, 25, 0.22), rgba(250, 204, 21, 0.55), transparent);
-  animation: efGlitchMaskA 6.5s cubic-bezier(0.22, 1, 0.36, 1) infinite;
-}
-
-.ef-wm-glitch-b {
-  top: 66%;
-  width: 44%;
-  height: 4px;
-  background: linear-gradient(90deg, transparent, rgba(37, 99, 235, 0.4), rgba(255, 255, 255, 0.65), transparent);
-  animation: efGlitchMaskB 8.2s cubic-bezier(0.22, 1, 0.36, 1) infinite;
+  height: 6px;
+  background: linear-gradient(90deg, transparent, var(--ef-bar), var(--ef-lemon), transparent);
+  animation: efGlitchMaskA 12s 2s cubic-bezier(0.22, 1, 0.36, 1) infinite;
 }
 
 .ef-wm-glitch-c {
-  top: 44%;
+  top: 36%;
   width: 52%;
-  height: 6px;
-  background: linear-gradient(90deg, transparent, rgba(17, 19, 25, 0.2), rgba(56, 189, 248, 0.45), transparent);
-  animation: efGlitchMaskA 7.8s 2.4s cubic-bezier(0.22, 1, 0.36, 1) infinite;
+  height: 5px;
+  background: linear-gradient(90deg, transparent, var(--ef-cobalt), #ffffff, transparent);
+  animation: efGlitchMaskA 12s 8s cubic-bezier(0.22, 1, 0.36, 1) infinite;
+}
+
+/* Dot-matrix patch beside NASCENCE */
+.ef-dot-patch {
+  position: absolute;
+  left: 24px;
+  bottom: 236px;
+  width: 128px;
+  height: 64px;
+  background-image: radial-gradient(var(--ef-wm-dot) 1px, transparent 1.3px);
+  background-size: 6px 6px;
+  -webkit-mask-image: linear-gradient(90deg, #000, transparent);
+  mask-image: linear-gradient(90deg, #000, transparent);
 }
 
 @keyframes efGlitchMaskA {
@@ -5584,14 +5664,7 @@ body,
   88% { opacity: 0; }
 }
 
-@keyframes efGlitchMaskB {
-  0%, 78%, 100% { transform: translateX(160%); opacity: 0; }
-  82% { transform: translateX(40%); opacity: 0.85; }
-  90% { transform: translateX(-130%); opacity: 0.85; }
-  94% { opacity: 0; }
-}
-
-/* Layer 2: Precision Grid Traveling Laser Light Beams */
+/* Layer 2: precision grid travelling light beams */
 .ef-grid-beams {
   position: absolute;
   inset: 0;
@@ -5603,7 +5676,7 @@ body,
   left: 0;
   width: 240px;
   height: 1.5px;
-  background: linear-gradient(90deg, transparent, rgba(37, 99, 235, 0.48), rgba(250, 204, 21, 0.72), transparent);
+  background: linear-gradient(90deg, transparent, rgba(42, 77, 230, 0.5), rgba(244, 226, 122, 0.8), transparent);
   opacity: 0;
 }
 
@@ -5614,7 +5687,7 @@ body,
 
 .ef-beam-h2 {
   top: 448px;
-  background: linear-gradient(90deg, transparent, rgba(99, 102, 241, 0.42), rgba(56, 189, 248, 0.65), transparent);
+  background: linear-gradient(90deg, transparent, rgba(106, 92, 246, 0.42), rgba(125, 211, 252, 0.65), transparent);
   animation: efLaserH 10.5s 3.6s linear infinite;
 }
 
@@ -5623,7 +5696,7 @@ body,
   top: 0;
   width: 1.5px;
   height: 190px;
-  background: linear-gradient(180deg, transparent, rgba(56, 189, 248, 0.5), rgba(250, 204, 21, 0.55), transparent);
+  background: linear-gradient(180deg, transparent, rgba(125, 211, 252, 0.5), rgba(244, 226, 122, 0.6), transparent);
   opacity: 0;
 }
 
@@ -5651,85 +5724,297 @@ body,
   100% { transform: translateY(calc(100vh + 210px)); opacity: 0; }
 }
 
-/* Layer 3: Kinetic Event-Horizon SVG & Flowing Infinity (∞) Ribbons */
+/* Layer 3: event-horizon eye, cobalt ∞ rails, prism glass ribbon */
 .ef-stage-svg {
   position: absolute;
   inset: 0;
   width: 100%;
   height: 100%;
-  opacity: 0.92;
 }
 
-[data-theme='dark'] .ef-stage-svg {
-  opacity: 1;
+/* Reading lane: in a conversation the art fades behind the centred message column (740px) */
+.ef-ambient-stage.is-reading .ef-stage-svg,
+.ef-ambient-stage.is-reading .ef-bg-watermark,
+.ef-ambient-stage.is-reading .ef-grid-beams {
+  --lane: 400px;
+  -webkit-mask-image: linear-gradient(90deg, #000 0, #000 calc(50% - var(--lane) - 70px), rgba(0, 0, 0, 0.18) calc(50% - var(--lane)), rgba(0, 0, 0, 0.18) calc(50% + var(--lane)), #000 calc(50% + var(--lane) + 70px), #000 100%);
+  mask-image: linear-gradient(90deg, #000 0, #000 calc(50% - var(--lane) - 70px), rgba(0, 0, 0, 0.18) calc(50% - var(--lane)), rgba(0, 0, 0, 0.18) calc(50% + var(--lane)), #000 calc(50% + var(--lane) + 70px), #000 100%);
 }
 
 .ef-ambient-stage.is-compact .ef-stage-svg {
-  opacity: 0.55;
+  opacity: 0.5;
+}
+
+.ef-svg-micro {
+  font-family: 'Cascadia Code', 'Consolas', monospace;
+  font-size: 8.5px;
+  font-weight: 700;
+  letter-spacing: 0.14em;
+  fill: var(--ef-micro);
+  opacity: 0.85;
+}
+
+.ef-wm-index {
+  position: absolute;
+  left: calc(100% + 0.18em);
+  top: 0.06em;
+  font-family: 'Bahnschrift', 'Segoe UI', sans-serif;
+  font-size: clamp(36px, 5vw, 80px);
+  font-weight: 400;
+  line-height: 1;
+  color: rgba(244, 226, 122, 0.25);
+  -webkit-text-stroke: 1.4px var(--ef-lemon);
+}
+
+.ef-dust-dot {
+  fill: #93a7ff;
+  opacity: 0.35;
+  animation: efDustBlink 6s ease-in-out infinite;
+}
+
+@keyframes efDustBlink {
+  0%, 100% { opacity: 0.12; }
+  50% { opacity: 0.6; }
+}
+
+.ef-glass-ribbon {
+  opacity: 0.95;
+  filter: drop-shadow(0 3px 6px rgba(42, 77, 230, 0.22)) drop-shadow(0 0 1px rgba(100, 116, 139, 0.45));
+}
+
+[data-theme='dark'] .ef-glass-ribbon {
+  opacity: 0.16;
+  filter: none;
+}
+
+[data-theme='dark'] .ef-capsule {
+  background-color: #1c2438;
+  box-shadow: inset 0 0 0 1px rgba(148, 163, 184, 0.28), 0 6px 18px rgba(0, 0, 0, 0.4);
+}
+
+.ef-glass-glint {
+  opacity: 0.9;
+  animation: efGlassGlint 12s linear infinite;
+}
+
+@keyframes efGlassGlint {
+  from { stroke-dashoffset: 0; }
+  to { stroke-dashoffset: -590; }
+}
+
+.ef-rail-ties {
+  animation: efTieFlow 3s linear infinite;
+}
+
+.ef-rail-ties-slow {
+  animation: efTieFlowB 6s linear infinite reverse;
+}
+
+/* Offsets are whole multiples of each dash period so every loop is seamless */
+@keyframes efTieFlow {
+  from { stroke-dashoffset: 0; }
+  to { stroke-dashoffset: -24.4; }
+}
+
+@keyframes efTieFlowB {
+  from { stroke-dashoffset: 0; }
+  to { stroke-dashoffset: -17.2; }
 }
 
 .ef-ring-cw-slow {
-  transform-origin: 940px 152px;
-  animation: efSpinCW 26s linear infinite;
+  transform-origin: 968px 176px;
+  animation: efSpinCW 48s linear infinite;
 }
 
 .ef-ring-ccw-mid {
-  transform-origin: 940px 152px;
-  animation: efSpinCCW 18s linear infinite;
+  transform-origin: 968px 176px;
+  animation: efSpinCCW 24s linear infinite;
 }
 
 .ef-ring-cw-fast {
-  transform-origin: 940px 152px;
-  animation: efSpinCW 11s linear infinite;
-}
-
-.ef-ambient-stage.is-busy .ef-ring-cw-fast {
-  animation-duration: 4.5s;
+  transform-origin: 968px 176px;
+  animation: efTiltSway 12s ease-in-out infinite;
 }
 
 .ef-horizon-breathe {
-  transform-origin: 940px 152px;
-  animation: efHorizonBreathe 5.2s ease-in-out infinite;
+  transform-origin: 968px 176px;
+  animation: efHorizonBreathe 6s ease-in-out infinite;
+}
+
+.ef-core-stars {
+  transform-origin: 968px 176px;
+  animation: efSpinCW 96s linear infinite;
+}
+
+.ef-eye-flash {
+  transform-origin: 968px 176px;
+  animation: efFlashPulse 6s ease-in-out infinite;
 }
 
 .ef-orb-glow {
-  transform-origin: 868px 196px;
-  animation: efOrbGlowPulse 3.4s ease-in-out infinite;
+  transform-origin: 232px 214px;
+  animation: efOrbGlowPulse 3s ease-in-out infinite;
 }
 
 .ef-dash-flow {
-  animation: efDashDrift 16s linear infinite;
+  animation: efDashDrift 24s linear infinite;
 }
 
 .ef-energy-trace {
-  animation: efEnergyFlow 7.5s linear infinite;
+  animation: efEnergyFlow 6s cubic-bezier(0.45, 0.05, 0.55, 0.95) infinite;
 }
 
 .ef-energy-trace-2 {
-  animation: efEnergyFlow 11s -3.8s linear infinite;
+  animation: efEnergyFlow 12s -4s linear infinite;
 }
 
-.ef-ambient-stage.is-busy .ef-energy-trace {
-  animation-duration: 3.6s;
+.ef-sparkle {
+  animation: efStarTwinkle 6s ease-in-out infinite;
 }
 
-.ef-float-slow {
-  animation: efGentleFloat 11s ease-in-out infinite;
+/* ---- Busy surge: energy packets fade in instead of abruptly speeding loops up ---- */
+.ef-surge {
+  opacity: 0;
+  transition: opacity 0.9s ease;
 }
 
-.ef-star-twinkle-1 {
-  transform-origin: 838px 94px;
-  animation: efStarTwinkle 3.2s ease-in-out infinite;
+.ef-ambient-stage.is-busy .ef-surge {
+  opacity: 1;
 }
 
-.ef-star-twinkle-2 {
-  transform-origin: 1044px 228px;
-  animation: efStarTwinkle 4.1s 1.1s ease-in-out infinite;
+.ef-surge-trace {
+  animation: efSurgeFlow 3s linear infinite;
 }
 
-.ef-star-twinkle-3 {
-  transform-origin: 172px 186px;
-  animation: efStarTwinkle 3.7s 0.6s ease-in-out infinite;
+.ef-surge-trace.is-b {
+  animation-duration: 2s;
+  animation-delay: -0.7s;
+}
+
+@keyframes efSurgeFlow {
+  from { stroke-dashoffset: 0; }
+  to { stroke-dashoffset: -830; }
+}
+
+/* ---- Mood tints on the eye ---- */
+.ef-mood-approval,
+.ef-mood-error {
+  opacity: 0;
+  transition: opacity 0.8s ease;
+  transform-origin: 968px 176px;
+}
+
+.ef-ambient-stage.is-mood-approval .ef-mood-approval {
+  opacity: 1;
+  animation: efMoodPulse 3s ease-in-out infinite;
+}
+
+.ef-ambient-stage.is-mood-error .ef-mood-error {
+  opacity: 0.9;
+  animation: efMoodFlicker 3s steps(1, end) infinite;
+}
+
+@keyframes efMoodPulse {
+  0%, 100% { opacity: 0.55; transform: scale(0.97); }
+  50% { opacity: 1; transform: scale(1.04); }
+}
+
+@keyframes efMoodFlicker {
+  0%, 100% { opacity: 0.9; }
+  6% { opacity: 0.2; }
+  9% { opacity: 0.9; }
+  12% { opacity: 0.35; }
+  15% { opacity: 0.9; }
+}
+
+/* ---- Pointer parallax: transforms are written by useStageParallax onto these layers ---- */
+.ef-bg-watermark.ef-par-far {
+  will-change: transform;
+}
+
+/* ---- One-time entrance choreography (~1.8s) ---- */
+.ef-draw-in {
+  stroke-dasharray: 1000 1000;
+  animation: efDrawIn 1.5s 0.25s cubic-bezier(0.65, 0, 0.35, 1) both;
+}
+
+.ef-draw-in.is-late {
+  animation-delay: 0.55s;
+}
+
+@keyframes efDrawIn {
+  from { stroke-dashoffset: 1000; }
+  to { stroke-dashoffset: 0; }
+}
+
+.ef-intro-fade,
+.ef-arc-lock {
+  animation: efIntroFade 0.9s 1.2s ease both;
+}
+
+.ef-intro-fade.is-late {
+  animation-delay: 1.5s;
+}
+
+@keyframes efIntroFade {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+.ef-eye-intro {
+  transform-origin: 968px 176px;
+  animation: efEyeBloom 1.3s 0.15s cubic-bezier(0.2, 0.9, 0.25, 1.15) both;
+}
+
+@keyframes efEyeBloom {
+  0% { opacity: 0; transform: scale(0.35) rotate(-25deg); filter: brightness(2.2); }
+  60% { opacity: 1; filter: brightness(1.4); }
+  100% { opacity: 1; transform: scale(1) rotate(0deg); filter: brightness(1); }
+}
+
+.ef-wm-word {
+  animation: efWipeIn 1.1s 0.1s cubic-bezier(0.65, 0, 0.35, 1) both;
+}
+
+.ef-wm-bottom .ef-wm-word {
+  animation-delay: 0.3s;
+}
+
+@keyframes efWipeIn {
+  from { clip-path: inset(0 100% 0 0); }
+  to { clip-path: inset(0 0 0 0); }
+}
+
+.ef-wm-bar,
+.ef-wm-index {
+  animation: efBarIn 0.7s 0.8s cubic-bezier(0.22, 1, 0.36, 1) both;
+  transform-origin: left center;
+}
+
+@keyframes efBarIn {
+  from { transform: scaleX(0); opacity: 0; }
+  to { transform: scaleX(1); opacity: 1; }
+}
+
+.ef-hud-rail > * {
+  animation: efRailIn 0.6s cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+
+.ef-hud-rail > :nth-child(1) { animation-delay: 0.7s; }
+.ef-hud-rail > :nth-child(2) { animation-delay: 0.78s; }
+.ef-hud-rail > :nth-child(3) { animation-delay: 0.86s; }
+.ef-hud-rail > :nth-child(4) { animation-delay: 0.94s; }
+.ef-hud-rail > :nth-child(5) { animation-delay: 1.02s; }
+.ef-hud-rail > :nth-child(6) { animation-delay: 1.1s; }
+.ef-hud-rail > :nth-child(7) { animation-delay: 1.18s; }
+
+@keyframes efRailIn {
+  from { opacity: 0; transform: translateX(18px); }
+  to { opacity: 1; transform: translateX(0); }
+}
+
+.ef-pillar-menu {
+  animation: efRailIn 0.6s 1.3s cubic-bezier(0.22, 1, 0.36, 1) both;
 }
 
 @keyframes efSpinCW {
@@ -5742,9 +6027,19 @@ body,
   to { transform: rotate(0deg); }
 }
 
+@keyframes efTiltSway {
+  0%, 100% { transform: rotate(-4deg); }
+  50% { transform: rotate(5deg); }
+}
+
 @keyframes efHorizonBreathe {
-  0%, 100% { transform: scale(1); opacity: 0.86; }
-  50% { transform: scale(1.09); opacity: 1; }
+  0%, 100% { transform: scale(1); opacity: 0.88; }
+  50% { transform: scale(1.045); opacity: 1; }
+}
+
+@keyframes efFlashPulse {
+  0%, 100% { transform: scale(0.92); opacity: 0.8; }
+  50% { transform: scale(1.08); opacity: 1; }
 }
 
 @keyframes efOrbGlowPulse {
@@ -5754,84 +6049,118 @@ body,
 
 @keyframes efDashDrift {
   from { stroke-dashoffset: 0; }
-  to { stroke-dashoffset: -260; }
+  to { stroke-dashoffset: -264; }
 }
 
 @keyframes efEnergyFlow {
   from { stroke-dashoffset: 0; }
-  to { stroke-dashoffset: -2210; }
-}
-
-@keyframes efGentleFloat {
-  0%, 100% { transform: translate(0, 0); }
-  50% { transform: translate(18px, -16px); }
+  to { stroke-dashoffset: -2490; }
 }
 
 @keyframes efStarTwinkle {
-  0%, 100% { transform: scale(0.84) rotate(0deg); opacity: 0.6; }
-  50% { transform: scale(1.22) rotate(12deg); opacity: 1; }
+  0%, 100% { transform: scale(0.7) rotate(0deg); opacity: 0.45; }
+  50% { transform: scale(1.15) rotate(10deg); opacity: 1; }
 }
 
-/* Layer 4: Signature Right-Edge Vertical Sci-Fi HUD Rail */
+/* Layer 4: right-edge rail — starfield capsules, chevrons, emblem, barcode */
 .ef-hud-rail {
   position: absolute;
-  top: 66px;
-  right: 12px;
-  bottom: 120px;
-  width: 24px;
+  top: 58px;
+  right: 14px;
+  bottom: 18px;
+  width: 46px;
   display: flex;
   flex-direction: column;
   align-items: center;
   gap: 12px;
-  opacity: 0.78;
 }
 
-.ef-hud-reticle {
-  width: 16px;
-  height: 16px;
-  border-radius: 50%;
-  border: 1.2px dashed var(--ef-blue);
+.ef-capsule {
   position: relative;
-  animation: efSpinCW 14s linear infinite;
-}
-
-.ef-hud-reticle::after {
-  content: '';
-  position: absolute;
-  inset: 4px;
-  border-radius: 50%;
-  background: var(--ef-yellow-bright);
-}
-
-.ef-hud-star-pill {
-  position: relative;
-  width: 18px;
-  height: 68px;
+  width: 40px;
+  height: 128px;
+  flex-shrink: 0;
   border-radius: 999px;
-  background: linear-gradient(180deg, #0f172a, #1e1b4b);
-  border: 1px solid rgba(96, 165, 250, 0.5);
-  box-shadow: 0 4px 14px rgba(37, 99, 235, 0.22);
-  overflow: hidden;
+  background-color: #0b0d14;
+  background-image:
+    radial-gradient(rgba(255, 255, 255, 0.9) 0.7px, transparent 1px),
+    radial-gradient(rgba(165, 180, 252, 0.7) 0.6px, transparent 1px);
+  background-size: 7px 9px, 11px 13px;
+  background-position: 0 0, 3px 5px;
+  box-shadow: 0 6px 18px rgba(15, 23, 42, 0.22);
+  animation: efCapsuleDrift 24s linear infinite;
 }
 
-.ef-micro-star {
+.ef-capsule.is-bottom {
+  margin-top: 4px;
+  animation-direction: reverse;
+}
+
+/* White inner slit like a hollow numeral stroke */
+.ef-capsule-slit {
   position: absolute;
-  width: 2.5px;
-  height: 2.5px;
-  border-radius: 50%;
-  background: #ffffff;
-  animation: efMicroBlink 2.4s ease-in-out infinite;
+  left: 50%;
+  top: 16px;
+  bottom: 16px;
+  width: 9px;
+  transform: translateX(-50%);
+  border-radius: 999px;
+  background: var(--bg-canvas);
 }
 
-.ef-micro-star.s1 { top: 12px; left: 5px; background: #facc15; animation-delay: 0s; }
-.ef-micro-star.s2 { top: 24px; left: 11px; animation-delay: 0.5s; }
-.ef-micro-star.s3 { top: 36px; left: 6px; background: #38bdf8; animation-delay: 1.1s; }
-.ef-micro-star.s4 { top: 48px; left: 10px; animation-delay: 1.7s; }
-.ef-micro-star.s5 { top: 56px; left: 5px; background: #c084fc; animation-delay: 0.8s; }
+@keyframes efCapsuleDrift {
+  from { background-position: 0 0, 3px 5px; }
+  to { background-position: 0 -180px, 3px -260px; }
+}
 
-@keyframes efMicroBlink {
-  0%, 100% { opacity: 0.25; transform: scale(0.75); }
-  50% { opacity: 1; transform: scale(1.35); }
+.ef-chevron {
+  width: 22px;
+  height: 15px;
+  flex-shrink: 0;
+}
+
+.ef-chevron path {
+  fill: var(--ef-cobalt);
+}
+
+.ef-chevron.is-mini {
+  width: 14px;
+  height: 10px;
+}
+
+.ef-emblem {
+  width: 44px;
+  height: 52px;
+  flex-shrink: 0;
+  display: grid;
+  place-items: center;
+  background: var(--bg-elevated);
+  border: 1px solid var(--border-strong);
+  clip-path: polygon(0 0, 100% 0, 100% 82%, 50% 100%, 0 82%);
+}
+
+.ef-emblem svg {
+  width: 32px;
+  height: 32px;
+  stroke: var(--text);
+}
+
+.ef-hud-tag {
+  padding: 2px 4px;
+  background: var(--ef-bar);
+  color: var(--ef-lemon);
+  font-family: 'Cascadia Code', 'Consolas', monospace;
+  font-size: 7px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  white-space: nowrap;
+}
+
+.ef-rail-ticks {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
 }
 
 .ef-hud-barcode {
@@ -5839,7 +6168,7 @@ body,
   flex-direction: column;
   align-items: center;
   gap: 3px;
-  width: 14px;
+  width: 22px;
 }
 
 .ef-hud-barcode span {
@@ -5850,12 +6179,12 @@ body,
   animation: efBarcodePulse 2.8s ease-in-out infinite;
 }
 
-.ef-hud-barcode .b1 { width: 14px; animation-delay: 0s; }
-.ef-hud-barcode .b2 { width: 8px; animation-delay: 0.3s; background: var(--ef-blue); }
-.ef-hud-barcode .b3 { width: 12px; animation-delay: 0.6s; }
-.ef-hud-barcode .b4 { width: 6px; animation-delay: 0.9s; background: var(--ef-yellow); }
-.ef-hud-barcode .b5 { width: 14px; animation-delay: 1.2s; }
-.ef-hud-barcode .b6 { width: 10px; animation-delay: 1.5s; }
+.ef-hud-barcode .b1 { width: 22px; animation-delay: 0s; }
+.ef-hud-barcode .b2 { width: 12px; animation-delay: 0.3s; background: var(--ef-cobalt); }
+.ef-hud-barcode .b3 { width: 18px; animation-delay: 0.6s; }
+.ef-hud-barcode .b4 { width: 8px; animation-delay: 0.9s; background: var(--ef-lemon); }
+.ef-hud-barcode .b5 { width: 22px; animation-delay: 1.2s; }
+.ef-hud-barcode .b6 { width: 14px; animation-delay: 1.5s; }
 
 @keyframes efBarcodePulse {
   0%, 100% { opacity: 0.35; transform: scaleX(0.72); }
@@ -5871,6 +6200,76 @@ body,
   color: var(--text-muted);
   opacity: 0.72;
   margin-top: auto;
+}
+
+/* Layer 5: decorative HUD index list */
+.ef-pillar-menu {
+  position: absolute;
+  right: 78px;
+  bottom: 136px;
+  width: 196px;
+  border: 1px solid var(--ef-bar);
+  background: color-mix(in srgb, var(--bg-elevated) 88%, transparent);
+  font-family: 'Cascadia Code', 'Consolas', monospace;
+  font-size: 8.5px;
+  font-weight: 700;
+  letter-spacing: 0.1em;
+  color: var(--text-secondary);
+}
+
+.ef-pillar-head {
+  display: flex;
+  justify-content: space-between;
+  padding: 4px 6px;
+  background: var(--ef-bar);
+  color: var(--bg-elevated);
+}
+
+.ef-pillar-head b {
+  color: var(--ef-lemon);
+}
+
+.ef-pillar-row {
+  display: flex;
+  gap: 8px;
+  padding: 2.5px 6px;
+}
+
+.ef-pillar-row .n {
+  color: var(--text-muted);
+}
+
+.ef-pillar-row.is-active {
+  background: var(--ef-cobalt);
+  color: #ffffff;
+}
+
+.ef-pillar-row.is-active .n {
+  color: #dbe4ff;
+}
+
+.ef-pillar-row .arrow {
+  margin-left: auto;
+}
+
+@media (max-width: 1360px) {
+  .ef-pillar-menu {
+    display: none;
+  }
+}
+
+@media (max-width: 980px) {
+  .ef-hud-rail {
+    display: none;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .ef-ambient-stage *,
+  .ef-ambient-stage *::before,
+  .ef-ambient-stage *::after {
+    animation: none !important;
+  }
 }
 
 /* Sidebar Brand Equalizer Waveform & Kinetic Mark */
@@ -5951,16 +6350,16 @@ body,
 /* Frosted Glass Depth + Mechanical HUD Reveal on Conversation Cards */
 .studio-ai-turn {
   position: relative;
-  background: rgba(255, 255, 255, 0.78);
-  backdrop-filter: blur(11px);
-  -webkit-backdrop-filter: blur(11px);
+  background: rgba(255, 255, 255, 0.95);
+  backdrop-filter: blur(14px);
+  -webkit-backdrop-filter: blur(14px);
   box-shadow: 0 6px 24px rgba(15, 23, 42, 0.05);
   animation: efCardReveal 0.28s cubic-bezier(0.22, 1, 0.36, 1) both;
   overflow: hidden;
 }
 
 [data-theme='dark'] .studio-ai-turn {
-  background: rgba(16, 20, 31, 0.8);
+  background: rgba(16, 20, 31, 0.95);
   box-shadow: 0 8px 28px rgba(0, 0, 0, 0.38);
 }
 
@@ -5981,14 +6380,14 @@ body,
 }
 
 .studio-user-bubble {
-  background: rgba(255, 255, 255, 0.86);
-  backdrop-filter: blur(10px);
-  -webkit-backdrop-filter: blur(10px);
+  background: rgba(255, 255, 255, 0.97);
+  backdrop-filter: blur(14px);
+  -webkit-backdrop-filter: blur(14px);
   animation: efCardReveal 0.24s cubic-bezier(0.22, 1, 0.36, 1) both;
 }
 
 [data-theme='dark'] .studio-user-bubble {
-  background: rgba(20, 26, 40, 0.86);
+  background: rgba(20, 26, 40, 0.96);
 }
 
 @keyframes efCardReveal {
@@ -6295,5 +6694,206 @@ body,
     max-width: 85vw;
     z-index: 35;
     box-shadow: -8px 0 28px rgba(0, 0, 0, 0.16);
+  }
+}
+
+/* ===== RINNE // ORIGINAL MASCOT (art: public/mascot, spec: docs/mascot/RINNE.md) ===== */
+.studio-feed-inner,
+.studio-composer-dock {
+  container-type: inline-size;
+}
+
+.rinne {
+  pointer-events: none;
+  user-select: none;
+}
+
+.rinne-figure {
+  position: relative;
+  width: 100%;
+  height: 100%;
+}
+
+.rinne-img,
+.rinne-placeholder {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+  object-position: center bottom;
+}
+
+.rinne-placeholder-text {
+  font-family: 'Cascadia Code', 'Consolas', monospace;
+  font-size: 8.5px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  fill: var(--text-muted);
+}
+
+/* Hero: waist-up figure leaning out over the top-right of the empty-room card */
+.studio-hero.ef-hero.has-rinne {
+  margin-top: 132px;
+  overflow: visible;
+}
+
+.rinne-hero {
+  position: absolute;
+  right: 6px;
+  top: -136px;
+  width: 260px;
+  height: 312px;
+  z-index: 3;
+  -webkit-mask-image: linear-gradient(to bottom, #000 82%, transparent);
+  mask-image: linear-gradient(to bottom, #000 82%, transparent);
+  animation: rinneFloat 6s ease-in-out infinite;
+}
+
+.studio-hero.has-rinne .ef-hero-content > p,
+.studio-hero.has-rinne .ef-hero-cn {
+  max-width: calc(100% - 250px);
+}
+
+@container (max-width: 600px) {
+  .rinne-hero {
+    display: none;
+  }
+  .studio-hero.ef-hero.has-rinne {
+    margin-top: 3vh;
+  }
+  .studio-hero.has-rinne .ef-hero-content > p,
+  .studio-hero.has-rinne .ef-hero-cn {
+    max-width: none;
+  }
+}
+
+/* Dock: bust standing in the gutter right of the composer, with a status bubble */
+.rinne-dock {
+  position: absolute;
+  left: calc(100% + 6px);
+  bottom: -18px;
+  width: 112px;
+  height: 136px;
+  z-index: 3;
+}
+
+.rinne-dock .rinne-figure {
+  animation: rinneFloat 6s ease-in-out infinite;
+}
+
+.rinne-dock.is-working .rinne-figure {
+  animation: rinneBob 1.6s ease-in-out infinite;
+}
+
+.rinne-dock.is-approval .rinne-figure {
+  animation: rinneHop 1.8s ease-in-out infinite;
+}
+
+.rinne-dock.is-error .rinne-figure {
+  animation: rinneShake 0.5s ease-in-out 2;
+}
+
+.rinne-dock.is-sleep .rinne-figure {
+  animation: rinneBreathe 5s ease-in-out infinite;
+  opacity: 0.85;
+}
+
+.rinne-bubble {
+  position: absolute;
+  right: 4px;
+  bottom: calc(100% + 6px);
+  width: 176px;
+  padding: 6px 9px 7px;
+  border: 1px solid var(--border-strong);
+  border-left: 3px solid var(--ef-blue);
+  background: var(--bg-elevated);
+  box-shadow: 0 6px 18px rgba(15, 23, 42, 0.1);
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.rinne-bubble::after {
+  content: '';
+  position: absolute;
+  right: 46px;
+  bottom: -6px;
+  width: 10px;
+  height: 10px;
+  background: var(--bg-elevated);
+  border-right: 1px solid var(--border-strong);
+  border-bottom: 1px solid var(--border-strong);
+  transform: rotate(45deg);
+}
+
+.rinne-bubble-tag {
+  font-family: 'Cascadia Code', 'Consolas', monospace;
+  font-size: 8.5px;
+  font-weight: 700;
+  letter-spacing: 0.12em;
+  color: var(--text-muted);
+}
+
+.rinne-bubble-text {
+  font-size: 12px;
+  line-height: 1.45;
+  color: var(--text);
+}
+
+.rinne-dock.is-approval .rinne-bubble {
+  border-left-color: var(--ef-yellow-bright);
+  animation: rinneBubblePulse 1.8s ease-in-out infinite;
+}
+
+.rinne-dock.is-error .rinne-bubble {
+  border-left-color: #ef4444;
+}
+
+.rinne-dock.is-done .rinne-bubble {
+  border-left-color: #10b981;
+}
+
+@container (max-width: 978px) {
+  .rinne-dock {
+    display: none;
+  }
+}
+
+@keyframes rinneFloat {
+  0%, 100% { transform: translateY(0); }
+  50% { transform: translateY(-5px); }
+}
+
+@keyframes rinneBob {
+  0%, 100% { transform: translateY(0) rotate(0deg); }
+  50% { transform: translateY(-3px) rotate(-1deg); }
+}
+
+@keyframes rinneHop {
+  0%, 70%, 100% { transform: translateY(0); }
+  80% { transform: translateY(-9px); }
+  90% { transform: translateY(0); }
+}
+
+@keyframes rinneShake {
+  0%, 100% { transform: translateX(0); }
+  25% { transform: translateX(-4px); }
+  75% { transform: translateX(4px); }
+}
+
+@keyframes rinneBreathe {
+  0%, 100% { transform: scale(1); }
+  50% { transform: scale(1.015) translateY(1px); }
+}
+
+@keyframes rinneBubblePulse {
+  0%, 100% { box-shadow: 0 6px 18px rgba(15, 23, 42, 0.1); }
+  50% { box-shadow: 0 6px 18px rgba(15, 23, 42, 0.1), 0 0 0 3px rgba(250, 204, 21, 0.35); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .rinne *,
+  .rinne {
+    animation: none !important;
   }
 }
