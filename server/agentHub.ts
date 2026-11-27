@@ -706,7 +706,7 @@ export class AgentHub extends EventEmitter {
       return { task: immediate, timeout: false, stopped: false };
     }
 
-    const waitMs = Math.min(600, Math.max(5, Math.round(timeoutSec))) * 1000;
+    const waitMs = Math.min(3600, Math.max(5, Math.round(timeoutSec))) * 1000;
 
     return new Promise((resolve) => {
       let settled = false;

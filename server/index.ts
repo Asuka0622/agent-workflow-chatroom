@@ -281,7 +281,7 @@ export function createApp(options?: { distDir?: string; portHint?: number; host?
   // Zero-token EventEmitter long-poll endpoint for `chatroom wait` (supports NDJSON heartbeat stream!)
   app.get('/api/agent/:agentId/wait', async (req, res) => {
     const rawTimeout = Number(req.query.timeout);
-    const timeoutSec = Number.isFinite(rawTimeout) && rawTimeout > 0 ? Math.min(600, Math.max(5, rawTimeout)) : 240;
+    const timeoutSec = Number.isFinite(rawTimeout) && rawTimeout > 0 ? Math.min(3600, Math.max(5, rawTimeout)) : 1800;
     const isStream = req.query.stream === '1' || req.query.stream === 'true';
     const rawHb = Number(req.query.heartbeat);
     const heartbeatSec = Number.isFinite(rawHb) && rawHb >= 2 ? Math.min(120, Math.round(rawHb)) : 25;

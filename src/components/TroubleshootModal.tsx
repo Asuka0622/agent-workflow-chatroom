@@ -16,9 +16,9 @@ import type { ConnectedAgent } from '../../shared/types';
 import { MemberAvatar } from './MemberAvatar';
 
 export function buildStandbyPrompt(agentId: string): string {
-  return `请开启低耗保活长连接待命模式，帮我自动响应本地聊天室消息（等待期间聊天室每 15 秒发保活心跳防断连、支持重启自动重连，全程 0 模型 token）：
-1. 运行 \`chatroom wait ${agentId} --timeout 240 --heartbeat 15 --json\`；
-2. 若返回 \`action: "handle_task"\`（有 \`task\`），完成任务后用 \`chatroom reply --agent ${agentId} --task <taskId> --stdin\`（或直接传内容）提交回复，然后立刻继续运行 \`chatroom wait ${agentId} --timeout 240 --heartbeat 15 --json\`；
+  return `请开启超长保活待命模式，帮我自动响应本地聊天室消息（单次等待 30 分钟仅占 1 轮调用，每 15 秒发保活心跳防断连、支持重启自动重连，全程 0 模型 token）：
+1. 运行 \`chatroom wait ${agentId} --timeout 1800 --heartbeat 15 --json\`；
+2. 若返回 \`action: "handle_task"\`（有 \`task\`），完成任务后用 \`chatroom reply --agent ${agentId} --task <taskId> --stdin\`（或直接传内容）提交回复，然后立刻继续运行 \`chatroom wait ${agentId} --timeout 1800 --heartbeat 15 --json\`；
 3. 若返回 \`action: "continue_wait"\`（正常超时无任务），不要结束任务，直接再次运行 \`chatroom wait\` 继续保活等待；
 4. 若返回 \`action: "stop"\`（聊天室端点了「停等」）或我手动叫停，再正式退出。`;
 }

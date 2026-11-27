@@ -449,7 +449,7 @@ async function main(): Promise<void> {
   if (cmd === 'wait') {
     const agentId = positionals[1] || strFlag(flags, 'agent', 'id') || session.lastAgentId;
     if (!agentId) throw new Error('请指定 agentId（例如：chatroom wait agent_deepseek-v4-1-flash --timeout 240 --json）');
-    const timeoutSec = Math.min(600, Math.max(5, Number(strFlag(flags, 'timeout')) || 240));
+    const timeoutSec = Math.min(3600, Math.max(5, Number(strFlag(flags, 'timeout')) || 1800));
     const heartbeatSec = Math.min(120, Math.max(2, Number(strFlag(flags, 'heartbeat')) || 15));
     const quiet = boolFlag(flags, 'quiet');
     const startWallMs = Date.now();
