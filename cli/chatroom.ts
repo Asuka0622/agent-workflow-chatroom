@@ -707,7 +707,9 @@ async function main(): Promise<void> {
     const setOnline = boolFlag(flags, 'online');
     const setOffline = boolFlag(flags, 'offline');
 
-    const isAgent = memberId.startsWith('agent_');
+    // External agents may use custom IDs (join --id <id>), so look the ID up instead of relying on the agent_ prefix
+    const { agents: knownAgents } = await apiReq<{ agents: ConnectedAgent[] }>(baseUrl, '/api/agents');
+    const isAgent = knownAgents.some((a) => a.id === memberId);
     if (isAgent) {
       const res = await apiReq<{ agent: ConnectedAgent }>(
         baseUrl,

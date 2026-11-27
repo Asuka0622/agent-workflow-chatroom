@@ -62,6 +62,7 @@ interface InternalAgent {
   info: ConnectedAgent;
   queue: AgentTask[];
   activeTask?: PendingDispatch;
+  pendingDispatches: Map<string, PendingDispatch>;
 }
 
 const AGENT_COLORS = [
@@ -182,68 +183,69 @@ export class AgentHub extends EventEmitter {
   private scanBridgeReplies(): void {
     let anyActive = false;
     for (const [agentId, entry] of this.agents.entries()) {
-      const active = entry.activeTask;
-      if (!active) continue;
+      if (entry.pendingDispatches.size === 0) continue;
       anyActive = true;
-      const taskId = active.task.taskId;
       const { repliesDir, doneDir } = this.ensureAgentBridgeDirs(agentId);
-      const candidates = [
-        path.join(repliesDir, `${taskId}.json`),
-        path.join(repliesDir, `${taskId}.md`),
-        path.join(repliesDir, `${taskId}.txt`),
-      ];
-      // Also allow a generic single reply file if agent writes replies/latest.json with matching taskId
       const latestJson = path.join(repliesDir, 'latest.json');
-      if (fs.existsSync(latestJson)) candidates.push(latestJson);
+      const hasLatest = fs.existsSync(latestJson);
 
-      for (const filePath of candidates) {
-        if (!fs.existsSync(filePath)) continue;
-        try {
-          const stat = fs.statSync(filePath);
-          if (!stat.isFile() || stat.size === 0) continue;
-          const raw = fs.readFileSync(filePath, 'utf8').trim();
-          if (!raw) continue;
+      for (const active of Array.from(entry.pendingDispatches.values())) {
+        const taskId = active.task.taskId;
+        const candidates = [
+          path.join(repliesDir, `${taskId}.json`),
+          path.join(repliesDir, `${taskId}.md`),
+          path.join(repliesDir, `${taskId}.txt`),
+        ];
+        if (hasLatest) candidates.push(latestJson);
 
-          let content = '';
-          let parsedTaskId: string | undefined = taskId;
-          if (filePath.endsWith('.json')) {
-            try {
-              const obj = JSON.parse(raw) as {
-                taskId?: string;
-                content?: string;
-                reply?: string;
-                message?: string;
-                text?: string;
-              };
-              if (filePath === latestJson && obj.taskId && obj.taskId !== taskId) {
+        for (const filePath of candidates) {
+          if (!fs.existsSync(filePath)) continue;
+          try {
+            const stat = fs.statSync(filePath);
+            if (!stat.isFile() || stat.size === 0) continue;
+            const raw = fs.readFileSync(filePath, 'utf8').trim();
+            if (!raw) continue;
+
+            let content = '';
+            let parsedTaskId: string | undefined = taskId;
+            if (filePath.endsWith('.json')) {
+              try {
+                const obj = JSON.parse(raw) as {
+                  taskId?: string;
+                  content?: string;
+                  reply?: string;
+                  message?: string;
+                  text?: string;
+                };
+                if (filePath === latestJson && obj.taskId && obj.taskId !== taskId) {
+                  continue;
+                }
+                parsedTaskId = obj.taskId || taskId;
+                content = (obj.content || obj.reply || obj.message || obj.text || '').trim();
+              } catch {
                 continue;
               }
-              parsedTaskId = obj.taskId || taskId;
-              content = (obj.content || obj.reply || obj.message || obj.text || '').trim();
-            } catch {
-              // File might still be mid-write; retry next tick
-              continue;
+            } else {
+              content = raw;
             }
-          } else {
-            content = raw;
-          }
 
-          if (!content) continue;
-          const archived = path.join(doneDir, `${taskId}-${Date.now()}${path.extname(filePath)}`);
-          try {
-            fs.renameSync(filePath, archived);
-          } catch {
+            if (!content) continue;
+            const archived = path.join(doneDir, `${taskId}-${Date.now()}${path.extname(filePath)}`);
             try {
-              fs.unlinkSync(filePath);
+              fs.renameSync(filePath, archived);
             } catch {
-              // ignore
+              try {
+                fs.unlinkSync(filePath);
+              } catch {
+                // ignore
+              }
             }
+            active.onLog?.(`[文件桥接回执] 已读取 ${path.basename(filePath)} 并自动提交到群聊。\n`);
+            this.submitReply(agentId, { taskId: parsedTaskId, content });
+            break;
+          } catch {
+            // ignore transient read lock
           }
-          active.onLog?.(`[文件桥接回执] 已读取 ${path.basename(filePath)} 并自动提交到群聊。\n`);
-          this.submitReply(agentId, { taskId: parsedTaskId, content });
-          break;
-        } catch {
-          // ignore transient read lock
         }
       }
     }
@@ -260,9 +262,15 @@ export class AgentHub extends EventEmitter {
     const saved = loadSavedAgents();
     for (const item of saved) {
       if (!item?.id) continue;
-      this.ensureAgentBridgeDirs(item.id);
-      // Zero-polling mode: registered agents stay ready (online=true) across restarts
-      // until explicitly removed or they call /leave
+      const { tasksDir } = this.ensureAgentBridgeDirs(item.id);
+      // Clean stale task files left from prior server restarts so bridge agents don't waste tokens on dead tasks
+      try {
+        for (const f of fs.readdirSync(tasksDir)) {
+          if (f.endsWith('.json')) fs.unlinkSync(path.join(tasksDir, f));
+        }
+      } catch {
+        // ignore
+      }
       this.agents.set(item.id, {
         info: {
           ...item,
@@ -273,6 +281,7 @@ export class AgentHub extends EventEmitter {
           activeTaskId: undefined,
         },
         queue: [],
+        pendingDispatches: new Map(),
       });
     }
   }
@@ -412,6 +421,7 @@ export class AgentHub extends EventEmitter {
     this.agents.set(id, {
       info,
       queue: [],
+      pendingDispatches: new Map(),
     });
     this.ensureAgentBridgeDirs(id);
     this.notify();
@@ -462,12 +472,7 @@ export class AgentHub extends EventEmitter {
     if (params.online !== undefined) {
       entry.info.online = params.online;
       if (!params.online) {
-        entry.info.busy = false;
-        if (entry.activeTask) {
-          clearTimeout(entry.activeTask.timer);
-          entry.activeTask.reject(new Error(`成员「${entry.info.name}」已设为离线`));
-          entry.activeTask = undefined;
-        }
+        this.rejectAllPending(entry, `成员「${entry.info.name}」已设为离线`);
       } else {
         entry.info.lastSeenAt = new Date().toISOString();
       }
@@ -487,14 +492,26 @@ export class AgentHub extends EventEmitter {
     const entry = this.agents.get(agentId);
     if (!entry) return false;
     entry.info.online = false;
-    entry.info.busy = false;
-    if (entry.activeTask) {
-      clearTimeout(entry.activeTask.timer);
-      entry.activeTask.reject(new Error(`成员「${entry.info.name}」已退出聊天室`));
-      entry.activeTask = undefined;
-    }
+    this.rejectAllPending(entry, `成员「${entry.info.name}」已退出聊天室`);
     this.notify();
     return true;
+  }
+
+  // Reject every pending dispatch (not only the active one) so no task is left hanging until timeout
+  private rejectAllPending(entry: InternalAgent, message: string): void {
+    const pending = Array.from(entry.pendingDispatches.values());
+    if (entry.activeTask && !entry.pendingDispatches.has(entry.activeTask.task.taskId)) {
+      pending.push(entry.activeTask);
+    }
+    for (const dispatch of pending) {
+      clearTimeout(dispatch.timer);
+      dispatch.reject(new Error(message));
+    }
+    entry.pendingDispatches.clear();
+    entry.activeTask = undefined;
+    entry.queue = [];
+    entry.info.busy = false;
+    entry.info.activeTaskId = undefined;
   }
 
   remove(agentId: string): boolean {
@@ -622,12 +639,14 @@ export class AgentHub extends EventEmitter {
 
     return new Promise<string>((resolve, reject) => {
       const cleanup = () => {
-        if (entry.activeTask?.task.taskId === task.taskId) {
-          entry.activeTask = undefined;
-        }
+        entry.pendingDispatches.delete(task.taskId);
+        entry.queue = entry.queue.filter((t) => t.taskId !== task.taskId);
         this.removeBridgeTaskFile(agentId, task.taskId);
-        entry.info.busy = false;
-        entry.info.activeTaskId = undefined;
+        // FIFO: the oldest still-pending task becomes the active one (Map keeps insertion order)
+        const nextRemaining = entry.pendingDispatches.values().next().value;
+        entry.activeTask = nextRemaining;
+        entry.info.busy = entry.pendingDispatches.size > 0;
+        entry.info.activeTaskId = nextRemaining?.task.taskId;
         options?.signal?.removeEventListener('abort', onAbort);
         this.notify();
       };
@@ -669,10 +688,12 @@ export class AgentHub extends EventEmitter {
         timer,
       };
 
-      entry.activeTask = dispatch;
-      entry.queue = [task];
+      entry.pendingDispatches.set(task.taskId, dispatch);
+      // FIFO: keep serving the oldest pending task first; a new task only becomes active when none is pending
+      if (!entry.activeTask) entry.activeTask = dispatch;
+      entry.queue.push(task);
       entry.info.busy = true;
-      entry.info.activeTaskId = task.taskId;
+      entry.info.activeTaskId = entry.activeTask.task.taskId;
       const taskFilePath = this.writeBridgeTaskFile(agentId, task);
       const hasListener = this.isListening(agentId);
       options?.onLog?.(
@@ -800,11 +821,10 @@ export class AgentHub extends EventEmitter {
     entry.info.online = true;
     entry.info.lastSeenAt = new Date().toISOString();
 
-    const active = entry.activeTask;
+    const active = params.taskId
+      ? entry.pendingDispatches.get(params.taskId) || (entry.activeTask?.task.taskId === params.taskId ? entry.activeTask : undefined)
+      : entry.activeTask || Array.from(entry.pendingDispatches.values())[0];
     if (!active) {
-      return false;
-    }
-    if (params.taskId && params.taskId !== active.task.taskId) {
       return false;
     }
     entry.queue = entry.queue.filter((t) => t.taskId !== active.task.taskId);
