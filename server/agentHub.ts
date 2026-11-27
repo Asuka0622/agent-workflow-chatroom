@@ -55,6 +55,8 @@ interface PendingDispatch {
   resolve: (content: string) => void;
   reject: (err: Error) => void;
   onLog?: (chunk: string) => void;
+  onClaimed?: (via: 'wait' | 'pull' | 'progress' | 'bridge') => void;
+  claimed?: boolean;
   timer: NodeJS.Timeout;
 }
 
@@ -240,6 +242,8 @@ export class AgentHub extends EventEmitter {
                 // ignore
               }
             }
+            entry.info.lastBridgeAt = new Date().toISOString();
+            this.markClaimed(active, 'bridge');
             active.onLog?.(`[文件桥接回执] 已读取 ${path.basename(filePath)} 并自动提交到群聊。\n`);
             this.submitReply(agentId, { taskId: parsedTaskId, content });
             break;
@@ -271,6 +275,7 @@ export class AgentHub extends EventEmitter {
       } catch {
         // ignore
       }
+      const hasBridgeWatcher = fs.existsSync(path.join(this.getAgentBridgeDir(item.id), 'watch.py'));
       this.agents.set(item.id, {
         info: {
           ...item,
@@ -278,6 +283,7 @@ export class AgentHub extends EventEmitter {
           online: item.online !== false,
           busy: false,
           listening: false,
+          lastBridgeAt: item.lastBridgeAt || (hasBridgeWatcher ? item.lastSeenAt : undefined),
           activeTaskId: undefined,
         },
         queue: [],
@@ -306,6 +312,30 @@ export class AgentHub extends EventEmitter {
     this.ensureHydrated();
     const set = this.waiters.get(agentId);
     return Boolean(set && set.size > 0);
+  }
+
+  getConnectionHint(agentId: string): 'listening' | 'reconnecting' | 'bridge' | 'auto' | 'manual' {
+    this.ensureHydrated();
+    const entry = this.agents.get(agentId);
+    if (!entry) return 'manual';
+    if (this.isListening(agentId)) return 'listening';
+    if (entry.info.trigger && entry.info.trigger.type !== 'manual') return 'auto';
+    if (entry.info.lastListenAt) {
+      const ageMs = Date.now() - new Date(entry.info.lastListenAt).getTime();
+      if (Number.isFinite(ageMs) && ageMs >= 0 && ageMs < 120_000) {
+        return 'reconnecting';
+      }
+    }
+    if (entry.info.lastBridgeAt || fs.existsSync(path.join(this.getAgentBridgeDir(agentId), 'watch.py'))) {
+      return 'bridge';
+    }
+    return 'manual';
+  }
+
+  private markClaimed(dispatch: PendingDispatch | undefined, via: 'wait' | 'pull' | 'progress' | 'bridge'): void {
+    if (!dispatch || dispatch.claimed) return;
+    dispatch.claimed = true;
+    dispatch.onClaimed?.(via);
   }
 
   private persist(): void {
@@ -533,6 +563,7 @@ export class AgentHub extends EventEmitter {
       timeoutSec?: number;
       signal?: AbortSignal;
       onLog?: (chunk: string) => void;
+      onClaimed?: (via: 'wait' | 'pull' | 'progress' | 'bridge') => void;
     },
   ): Promise<string> {
     this.ensureHydrated();
@@ -685,6 +716,8 @@ export class AgentHub extends EventEmitter {
           reject(err);
         },
         onLog: options?.onLog,
+        onClaimed: options?.onClaimed,
+        claimed: false,
         timer,
       };
 
@@ -718,11 +751,15 @@ export class AgentHub extends EventEmitter {
       throw new Error('Agent 未注册，请先调用 chatroom join 或 POST /api/agent/join');
     }
 
+    const nowIso = new Date().toISOString();
     entry.info.online = true;
-    entry.info.lastSeenAt = new Date().toISOString();
+    entry.info.lastSeenAt = nowIso;
+    entry.info.lastListenAt = nowIso;
 
     const immediate = entry.activeTask?.task || entry.queue[0] || null;
     if (immediate) {
+      const dispatch = entry.pendingDispatches.get(immediate.taskId) || entry.activeTask;
+      this.markClaimed(dispatch, 'wait');
       this.notify();
       return { task: immediate, timeout: false, stopped: false };
     }
@@ -758,14 +795,20 @@ export class AgentHub extends EventEmitter {
         }
         const nextTask = entry.activeTask?.task || entry.queue[0] || null;
         if (nextTask) {
-          entry.info.lastSeenAt = new Date().toISOString();
+          const ts = new Date().toISOString();
+          entry.info.lastSeenAt = ts;
+          entry.info.lastListenAt = ts;
+          const dispatch = entry.pendingDispatches.get(nextTask.taskId) || entry.activeTask;
+          this.markClaimed(dispatch, 'wait');
           finish(nextTask, false, false);
         }
       };
 
       const onAbort = () => finish(null, true, false);
       const timer = setTimeout(() => {
-        entry.info.lastSeenAt = new Date().toISOString();
+        const ts = new Date().toISOString();
+        entry.info.lastSeenAt = ts;
+        entry.info.lastListenAt = ts;
         finish(null, true, false);
       }, waitMs);
 
@@ -795,9 +838,14 @@ export class AgentHub extends EventEmitter {
     this.notify();
 
     if (entry.activeTask) {
+      this.markClaimed(entry.activeTask, 'pull');
       return entry.activeTask.task;
     }
-    return entry.queue[0] || null;
+    const next = entry.queue[0] || null;
+    if (next) {
+      this.markClaimed(entry.pendingDispatches.get(next.taskId), 'pull');
+    }
+    return next;
   }
 
   reportProgress(agentId: string, message: string): boolean {
@@ -806,6 +854,9 @@ export class AgentHub extends EventEmitter {
     if (!entry) return false;
     entry.info.online = true;
     entry.info.lastSeenAt = new Date().toISOString();
+    if (entry.activeTask) {
+      this.markClaimed(entry.activeTask, 'progress');
+    }
     if (entry.activeTask?.onLog && message.trim()) {
       entry.activeTask.onLog(`[${entry.info.name}] ${message.trim()}\n`);
     }

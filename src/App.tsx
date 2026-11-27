@@ -81,10 +81,13 @@ import {
 } from './components/WorkbenchModal';
 import { WorkflowTemplateCanvas } from './components/WorkflowTemplateCanvas';
 import { WorkspacePane } from './components/WorkspacePane';
-import { EndfieldAmbientStage } from './components/EndfieldAmbientStage';
+import { AmbientStage } from './components/AmbientStage';
+import { BRAND } from './brand';
 import { RinneMascot, RINNE_LINES, type RinneState } from './components/RinneMascot';
+import { JournalCover, type CoverIssue, type CoverStep } from './components/JournalCover';
 import {
   TroubleshootModal,
+  buildFileBridgePrompt,
   buildStandbyPrompt,
   diagnoseMessageError,
 } from './components/TroubleshootModal';
@@ -205,6 +208,8 @@ export const App: React.FC = () => {
   const [runningQuickPluginId, setRunningQuickPluginId] = useState('');
   const [editingMember, setEditingMember] = useState<EditableMember | null>(null);
   const [copiedId, setCopiedId] = useState('');
+  const [expandedWakeIds, setExpandedWakeIds] = useState<Record<string, boolean>>({});
+  const [wakeNowTick, setWakeNowTick] = useState(() => Date.now());
   const [toast, setToast] = useState('');
 
   const messagesEndRef = useRef<HTMLDivElement | null>(null);
@@ -403,11 +408,14 @@ export const App: React.FC = () => {
         color: a.accentColor || '#10b981',
         presence: (busyMemberIds.has(a.id) ? 'working' : 'idle') as MemberPresence,
         listening: Boolean(a.listening),
+        bridgeActive: Boolean(a.lastBridgeAt),
         subtitle: a.listening
           ? '零耗长连接监听待命中（@后秒回）'
-          : a.trigger?.type === 'cli'
-            ? `外部 CLI · ${a.trigger.command}`
-            : '外部接入模型',
+          : a.lastBridgeAt
+            ? '文件夹桥接模式已连通（自动回执）'
+            : a.trigger?.type === 'cli'
+              ? `外部 CLI · ${a.trigger.command}`
+              : '外部接入模型',
         thinkingLevel: a.thinkingLevel || ('default' as ThinkingLevel),
         thinkingOptions: getNativeThinkingOptions({
           modelName: a.modelName || a.name,
@@ -423,6 +431,7 @@ export const App: React.FC = () => {
         color: p.accentColor,
         presence: (busyMemberIds.has(p.id) ? 'working' : 'idle') as MemberPresence,
         listening: false,
+        bridgeActive: false,
         subtitle: p.connectionType && p.connectionType !== 'cli'
           ? `直连 API · ${p.model || p.id}`
           : `本地订阅 CLI · ${p.model || p.command}`,
@@ -447,6 +456,7 @@ export const App: React.FC = () => {
         color: a.accentColor || '#64748b',
         presence: 'offline' as MemberPresence,
         listening: false,
+        bridgeActive: false,
         subtitle: a.trigger?.type === 'cli' ? `外部 CLI · ${a.trigger.command}` : '外部接入模型',
         thinkingLevel: a.thinkingLevel || ('default' as ThinkingLevel),
         kind: 'agent' as const,
@@ -458,6 +468,7 @@ export const App: React.FC = () => {
         color: p.accentColor,
         presence: 'offline' as MemberPresence,
         listening: false,
+        bridgeActive: false,
         subtitle: p.connectionType && p.connectionType !== 'cli'
           ? `直连 API · ${p.model || p.id}`
           : `本地订阅 CLI · ${p.model || p.command}`,
@@ -1444,6 +1455,16 @@ export const App: React.FC = () => {
   };
 
   const messages = activeRun?.messages || [];
+  const hasStreamingWakeMsg = useMemo(
+    () => messages.some((m) => m.status === 'streaming' && Boolean(m.wakePrompt)),
+    [messages],
+  );
+  useEffect(() => {
+    if (!hasStreamingWakeMsg) return;
+    setWakeNowTick(Date.now());
+    const id = window.setInterval(() => setWakeNowTick(Date.now()), 1000);
+    return () => window.clearInterval(id);
+  }, [hasStreamingWakeMsg]);
   const realMessages = messages.filter((m) => m.role !== 'system');
   const systemNotices = messages.filter(
     (m) => m.role === 'system' && !m.content.startsWith('欢迎来到'),
@@ -1478,6 +1499,41 @@ export const App: React.FC = () => {
       ? `正在协作中…（${workingCount} 位成员工作中）`
       : RINNE_LINES[rinneState];
 
+  // Journal cover: each room is one issue, the active workflow's steps are its contents
+  const coverIssue: CoverIssue = (() => {
+    const ordered = [...runs].sort((a, b) => a.createdAt.localeCompare(b.createdAt));
+    const idx = activeRun ? ordered.findIndex((r) => r.id === activeRun.id) : -1;
+    const repo = (activeRun?.repoPath || repoPath || '').replace(/[\\/]+$/, '');
+    const statusLabel: Record<string, string> = {
+      idle: '待启动',
+      running: '进行中',
+      waiting_approval: '等你拍板',
+      completed: '已完成',
+      failed: '出错',
+      aborted: '已终止',
+    };
+    return {
+      no: idx >= 0 ? idx + 1 : ordered.length + 1,
+      title: activeRun?.title || '新协作会话',
+      createdAt: activeRun?.createdAt,
+      workspace: repo.split(/[\\/]/).pop() || 'workspace',
+      statusLabel: statusLabel[activeRun?.status || 'idle'] || '待启动',
+      messageCount: realMessages.length,
+      requirement: activeRun?.requirement,
+    };
+  })();
+  const coverSteps: CoverStep[] = (workflow?.nodes || [])
+    .filter((n) => n.enabled !== false)
+    .map((n) => {
+      const provider = combinedProviders.find((p) => p.id === n.providerId);
+      const owner = n.kind.startsWith('human_')
+        ? '人工'
+        : ['shell', 'condition', 'delay', 'file_read', 'file_write', 'http'].includes(n.kind)
+          ? '系统'
+          : provider?.shortName || provider?.name || n.providerId || '未分配';
+      return { id: n.id, title: n.title.replace(/（.*?）/g, ''), owner };
+    });
+
   return (
     <div className="studio-app">
       {/* ===== Left Collapsible, Resizable, Unified-Scroll Sidebar ===== */}
@@ -1492,8 +1548,8 @@ export const App: React.FC = () => {
             <div className="ef-brand-left">
               <span className="ef-infinity-mark">∞</span>
               <div className="ef-brand-text">
-                <span className="ef-brand-title">TIMELESS // STUDIO</span>
-                <span className="ef-brand-sub">MULTI-AGENT PROTOCOL</span>
+                <span className="ef-brand-title">{BRAND.title}</span>
+                <span className="ef-brand-sub">{BRAND.sub}</span>
               </div>
             </div>
             <div className="ef-brand-right">
@@ -1503,7 +1559,7 @@ export const App: React.FC = () => {
               >
                 <i /><i /><i /><i />
               </span>
-              <span className="ef-index-tag">05</span>
+              <span className="ef-index-tag">{BRAND.code}</span>
             </div>
           </div>
 
@@ -1777,7 +1833,7 @@ export const App: React.FC = () => {
                       key={m.id}
                       type="button"
                       className={`member-compact-btn ${selectedTargets.includes(m.id) ? 'active' : ''}`}
-                      title={`${m.name}（${m.listening ? '⚡ 监听待命' : m.presence === 'working' ? '工作中' : m.presence === 'offline' ? '离线' : '在线 · 空闲'}）· 点击 @点名`}
+                      title={`${m.name}（${m.listening ? '⚡ 监听待命' : m.bridgeActive ? '📁 文件桥接' : m.presence === 'working' ? '工作中' : m.presence === 'offline' ? '离线' : '在线 · 空闲'}）· 点击 @点名`}
                       onClick={() => {
                         if (m.presence !== 'offline') mentionMemberQuick(m.id, m.name);
                       }}
@@ -1853,7 +1909,9 @@ export const App: React.FC = () => {
                           ? '离线'
                           : m.listening
                             ? '⚡ 监听待命'
-                            : '在线 · 空闲';
+                            : m.bridgeActive
+                              ? '📁 文件桥接'
+                              : '在线 · 空闲';
 
                       return (
                         <div
@@ -2007,11 +2065,11 @@ export const App: React.FC = () => {
           </div>
         )}
 
-        <EndfieldAmbientStage
+        <AmbientStage
           compact={showCanvas || showProjectWorkspace}
-          isBusy={isRunning || workingCount > 0}
           reading={!isFreshRoom}
           quietBottom={!isFreshRoom && showRinne}
+          eyeDocked={isFreshRoom}
           mood={
             rinneState === 'approval'
               ? 'approval'
@@ -2159,92 +2217,18 @@ export const App: React.FC = () => {
         <div className="studio-feed">
           <div className="studio-feed-inner">
             {isFreshRoom ? (
-              <div className={`studio-hero ef-hero ${showRinne ? 'has-rinne' : ''}`}>
-                {showRinne && <RinneMascot variant="hero" />}
-                {/* TIMELESS NASCENCE ∞ Inspired Event-Horizon & Orbital Wireframe Backdrop */}
-                <svg
-                  className="ef-hero-orbit-svg"
-                  viewBox="0 0 720 260"
-                  preserveAspectRatio="xMaxYMin slice"
-                  aria-hidden="true"
-                >
-                  <defs>
-                    <linearGradient id="efRibbonGrad" x1="0%" y1="0%" x2="100%" y2="0%">
-                      <stop offset="0%" stopColor="#3b82f6" stopOpacity="0.06" />
-                      <stop offset="50%" stopColor="#3b82f6" stopOpacity="0.28" />
-                      <stop offset="100%" stopColor="#818cf8" stopOpacity="0.08" />
-                    </linearGradient>
-                  </defs>
-                  {/* Sweeping infinity wireframe ribbon */}
-                  <path
-                    d="M 190 135 C 250 45, 365 45, 425 135 C 485 225, 610 225, 675 135 C 610 45, 485 45, 425 135 C 365 225, 250 225, 190 135 Z"
-                    fill="none"
-                    stroke="url(#efRibbonGrad)"
-                    strokeWidth="1.5"
-                  />
-                  <path
-                    d="M 215 135 C 270 65, 365 65, 425 135 C 485 205, 590 205, 650 135 C 590 65, 485 65, 425 135 C 365 205, 270 205, 215 135 Z"
-                    fill="none"
-                    stroke="url(#efRibbonGrad)"
-                    strokeWidth="0.9"
-                    strokeDasharray="4 4"
-                  />
-                </svg>
-
-                <div className="ef-hero-content">
-                  <div className="ef-hero-meta-row">
-                    <span className="ef-index-tag">05</span>
-                    <span className="ef-hero-code">FOUNDATION // LOCAL MULTI-AGENT PROTOCOL ∞</span>
-                  </div>
-
-                  <div className="ef-hero-title-wrap">
-                    <h1 className="ef-hero-display">
-                      TIMELESS<span className="ef-hero-display-accent">//</span>COLLAB
-                    </h1>
-                    <span className="ef-glitch-bar" aria-hidden="true" />
-                  </div>
-
-                  <div className="ef-hero-cn">多模型本地协作终端</div>
-                  <p>
-                    将 Claude、DeepSeek、Gemini、Codex 等订阅与本地模型接入同一精密协作空间，随时 @ 并行讨论、浏览工作区代码或以画布节点推进全流程研发。
-                  </p>
-
-                  <div className="ef-pillars-label">QUICK LAUNCH // THREE PROTOCOLS</div>
-
-                  <div className="studio-hero-cards">
-                    <button
-                      type="button"
-                      className="hero-card"
-                      onClick={() => setShowInvite(true)}
-                    >
-                      <div className="hero-card-title">
-                        <span className="hero-card-num">01</span>
-                        <UserPlus size={14} />
-                        <span>邀请外部 Agent 接入</span>
-                      </div>
-                      <div className="hero-card-desc">
-                        复制固定接入指令发给任意 Agent，零配置连入当前终端
-                      </div>
-                    </button>
-
-                    {QUICK_PROMPTS.map((q, idx) => (
-                      <button
-                        key={idx}
-                        type="button"
-                        className="hero-card"
-                        onClick={() => setInput(q.text)}
-                      >
-                        <div className="hero-card-title">
-                          <span className="hero-card-num">0{idx + 2}</span>
-                          <Sparkles size={14} />
-                          <span>{q.title}</span>
-                        </div>
-                        <div className="hero-card-desc">{q.text}</div>
-                      </button>
-                    ))}
-                  </div>
-                </div>
-              </div>
+              <JournalCover
+                showRinne={showRinne}
+                runs={runs}
+                issue={coverIssue}
+                workflowName={workflow?.name || '多模型协作工作流'}
+                steps={coverSteps}
+                onOpenSteps={openWorkflowCanvas}
+                quickActions={[
+                  { label: '邀请 Agent 接入', onPick: () => setShowInvite(true) },
+                  ...QUICK_PROMPTS.map((q) => ({ label: q.title, onPick: () => setInput(q.text) })),
+                ]}
+              />
             ) : (
               messages
                 .filter((m) => !(m.role === 'system' && m.content.startsWith('欢迎来到')))
@@ -2333,72 +2317,150 @@ export const App: React.FC = () => {
                       <div
                         className={`studio-ai-content ${msg.status === 'error' ? 'is-error' : ''}`}
                       >
-                        {msg.status === 'streaming' ? (
-                          <div className="studio-pending-block">
-                            <div className="studio-thinking-pill">
-                              <Loader2 size={14} className="spin" />
-                              <span>
-                                {msg.wakePrompt
-                                  ? `任务已派发给 ${msg.senderName}（按需启动，无轮询）`
+                        {msg.status === 'streaming' ? (() => {
+                          const liveAgent = connectedAgents.find((a) => a.id === msg.senderId);
+                          const isNowListening = Boolean(liveAgent?.listening);
+                          const isBridgeAgent =
+                            Boolean(liveAgent?.lastBridgeAt) ||
+                            Boolean(msg.stageTitle?.includes('文件桥接'));
+                          const createdMs = new Date(msg.createdAt).getTime();
+                          const elapsedSec = Number.isFinite(createdMs)
+                            ? Math.max(0, (wakeNowTick - createdMs) / 1000)
+                            : 999;
+                          const lastListenAgeSec = liveAgent?.lastListenAt
+                            ? Math.max(
+                                0,
+                                (wakeNowTick - new Date(liveAgent.lastListenAt).getTime()) / 1000,
+                              )
+                            : Infinity;
+                          const inReconnectGrace =
+                            !isBridgeAgent && lastListenAgeSec < 120 && elapsedSec < 12;
+                          const showWakeHelper =
+                            Boolean(msg.wakePrompt) && !isNowListening && !inReconnectGrace;
+                          const wakeExpanded = Boolean(expandedWakeIds[msg.id]);
+
+                          const pillText = isNowListening
+                            ? msg.logs.length > 0
+                              ? msg.logs[msg.logs.length - 1]
+                              : `${displaySenderName} 已连上监听待命，正在处理...`
+                            : inReconnectGrace
+                              ? `${displaySenderName} 正在接单处理中...`
+                              : isBridgeAgent
+                                ? `已写入桥接目录 tasks\\，等待 ${displaySenderName} 自动回执...`
+                                : msg.wakePrompt
+                                  ? `任务已就绪，等待 ${displaySenderName} 接单...`
                                   : msg.logs.length > 0
                                     ? msg.logs[msg.logs.length - 1]
-                                    : `${msg.senderName} 正在思考与执行...`}
-                              </span>
-                            </div>
-                            {msg.wakePrompt && (
-                              <div className="wake-card">
-                                <div className="wake-diag-note">
-                                  <AlertTriangle size={13} style={{ flexShrink: 0, marginTop: 1 }} />
-                                  <div>
-                                    <strong>为什么需要手动唤醒？</strong>
-                                    <span>
-                                      {' '}{displaySenderName} 当前未开启「⚡ 监听待命」（可能是首次未挂起、上次点了单次唤醒，或对方客户端达到轮次上限自动退出）。点击下方<strong>复制保活待命指令</strong>发给对方即可恢复自动秒回（每 15s 保活心跳 / 0 token / 重启自动重连）。
-                                    </span>
-                                    <button
-                                      type="button"
-                                      className="wake-diag-link"
-                                      onClick={() => setShowTroubleshoot(true)}
-                                    >
-                                      打开排障中心 →
-                                    </button>
-                                  </div>
-                                </div>
-                                <div className="wake-card-row">
-                                  <span>复制下方指令发给 {displaySenderName}：</span>
-                                  <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
-                                    <button
-                                      type="button"
-                                      className="btn btn-ink btn-sm"
-                                      title="复制零耗保活长连接待命指令发给该模型，等待期间每 15 秒自动保活心跳（0 token）且支持重启自动重连"
-                                      onClick={async () => {
-                                        await navigator.clipboard.writeText(buildStandbyPrompt(msg.senderId));
-                                        setCopiedId(`standby_${msg.id}`);
-                                        flash('已复制保活心跳待命指令，发给对方即可持续监听自动秒回');
-                                        setTimeout(() => setCopiedId(''), 1800);
-                                      }}
-                                    >
-                                      <Terminal size={12} />
-                                      {copiedId === `standby_${msg.id}` ? '已复制待命指令' : '复制保活待命指令（推荐）'}
-                                    </button>
-                                    <button
-                                      type="button"
-                                      className="btn btn-sm"
-                                      onClick={async () => {
-                                        await navigator.clipboard.writeText(msg.wakePrompt!);
-                                        setCopiedId(`wake_${msg.id}`);
-                                        setTimeout(() => setCopiedId(''), 1600);
-                                      }}
-                                    >
-                                      <Copy size={12} />
-                                      {copiedId === `wake_${msg.id}` ? '已复制单次唤醒' : '仅单次唤醒'}
-                                    </button>
-                                  </div>
-                                </div>
-                                <div className="wake-code">{msg.wakePrompt}</div>
+                                    : `${displaySenderName} 正在思考与执行...`;
+
+                          return (
+                            <div className="studio-pending-block">
+                              <div className="studio-thinking-pill">
+                                <Loader2 size={14} className="spin" />
+                                <span>{pillText}</span>
                               </div>
-                            )}
-                          </div>
-                        ) : (
+                              {showWakeHelper && (
+                                <div className={`wake-compact-bar ${isBridgeAgent ? 'is-bridge' : ''}`}>
+                                  <div className="wake-compact-head">
+                                    <span className="wake-compact-label">
+                                      <span className={`wake-compact-dot ${isBridgeAgent ? 'is-bridge' : ''}`} />
+                                      {isBridgeAgent
+                                        ? '文件夹桥接模式 · 无需手动唤醒'
+                                        : '未检测到保活监听'}
+                                    </span>
+                                    <div className="wake-compact-actions">
+                                      {isBridgeAgent ? (
+                                        <button
+                                          type="button"
+                                          className="btn btn-sm wake-mini-btn"
+                                          title="复制文件夹桥接接入指令"
+                                          onClick={async () => {
+                                            await navigator.clipboard.writeText(
+                                              buildFileBridgePrompt(msg.senderId, displaySenderName),
+                                            );
+                                            setCopiedId(`bridge_${msg.id}`);
+                                            flash(`已复制「${displaySenderName}」文件夹桥接指令`);
+                                            setTimeout(() => setCopiedId(''), 1800);
+                                          }}
+                                        >
+                                          <Copy size={11} />
+                                          {copiedId === `bridge_${msg.id}` ? '已复制' : '复制桥接指令'}
+                                        </button>
+                                      ) : (
+                                        <>
+                                          <button
+                                            type="button"
+                                            className="btn btn-ink btn-sm wake-mini-btn"
+                                            title="复制零耗保活长连接待命指令发给该模型（每 15s 保活心跳 / 0 token / 重启自动重连）"
+                                            onClick={async () => {
+                                              await navigator.clipboard.writeText(
+                                                buildStandbyPrompt(msg.senderId),
+                                              );
+                                              setCopiedId(`standby_${msg.id}`);
+                                              flash('已复制保活待命指令，发给对方即可恢复自动秒回');
+                                              setTimeout(() => setCopiedId(''), 1800);
+                                            }}
+                                          >
+                                            <Terminal size={11} />
+                                            {copiedId === `standby_${msg.id}` ? '已复制' : '复制保活指令'}
+                                          </button>
+                                          <button
+                                            type="button"
+                                            className="btn btn-sm wake-mini-btn"
+                                            onClick={async () => {
+                                              await navigator.clipboard.writeText(msg.wakePrompt!);
+                                              setCopiedId(`wake_${msg.id}`);
+                                              setTimeout(() => setCopiedId(''), 1600);
+                                            }}
+                                          >
+                                            <Copy size={11} />
+                                            {copiedId === `wake_${msg.id}` ? '已复制' : '单次唤醒'}
+                                          </button>
+                                        </>
+                                      )}
+                                      <button
+                                        type="button"
+                                        className="wake-detail-toggle"
+                                        onClick={() =>
+                                          setExpandedWakeIds((prev) => ({
+                                            ...prev,
+                                            [msg.id]: !prev[msg.id],
+                                          }))
+                                        }
+                                      >
+                                        {wakeExpanded ? '收起 ▴' : '详情 ▾'}
+                                      </button>
+                                    </div>
+                                  </div>
+
+                                  {wakeExpanded && (
+                                    <div className="wake-detail-drawer">
+                                      <div className="wake-detail-note">
+                                        {isBridgeAgent ? (
+                                          <span>
+                                            {displaySenderName} 通过本地目录 <code>chatroom-bridge\{msg.senderId}\tasks</code> 接收任务并写回 <code>replies\</code>。若长时间未回复，请确认对方窗口的监听脚本或定时任务仍在运行。
+                                          </span>
+                                        ) : (
+                                          <span>
+                                            {displaySenderName} 当前未挂起「⚡ 监听待命」（可能是首次未启动、上次点了单次唤醒或对方会话已退出）。发送<strong>保活待命指令</strong>即可恢复 0 token 自动秒回；一旦对方接单本提示将自动隐藏。
+                                          </span>
+                                        )}
+                                        <button
+                                          type="button"
+                                          className="wake-diag-link"
+                                          onClick={() => setShowTroubleshoot(true)}
+                                        >
+                                          排障中心 →
+                                        </button>
+                                      </div>
+                                      <div className="wake-code">{msg.wakePrompt}</div>
+                                    </div>
+                                  )}
+                                </div>
+                              )}
+                            </div>
+                          );
+                        })() : (
                           <>
                             {msg.logs.length > 0 && (
                               <details className="studio-thought-toggle">

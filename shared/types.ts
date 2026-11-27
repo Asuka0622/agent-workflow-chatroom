@@ -272,6 +272,8 @@ export interface ConnectedAgent {
   online: boolean;
   busy: boolean;
   listening?: boolean;
+  lastListenAt?: string;
+  lastBridgeAt?: string;
   roomId?: string;
   joinedAt: string;
   lastSeenAt: string;

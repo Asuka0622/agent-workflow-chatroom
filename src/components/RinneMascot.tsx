@@ -1,4 +1,5 @@
 import React, { useEffect, useState } from 'react';
+import { EventHorizonEye, type EyeMood } from './EventHorizonEye';
 
 export type RinneState = 'idle' | 'listening' | 'working' | 'approval' | 'error' | 'done' | 'sleep';
 
@@ -29,6 +30,8 @@ export const RINNE_LINES: Record<RinneState, string> = {
   sleep: '大家都不在线…我先眯一会儿。',
 };
 
+const EYE_MOOD: Partial<Record<RinneState, EyeMood>> = { working: 'busy', approval: 'approval', error: 'error' };
+
 export const RinneMascot: React.FC<RinneMascotProps> = ({ variant, state = 'idle', line }) => {
   const sources = candidates(variant, state);
   const pickSource = () => sources.find((s) => !failedSources.has(s)) || null;
@@ -52,6 +55,8 @@ export const RinneMascot: React.FC<RinneMascotProps> = ({ variant, state = 'idle
           <span className="rinne-bubble-text">{line}</span>
         </div>
       )}
+      {/* The event-horizon eye sits behind her as a halo */}
+      <EventHorizonEye className="rinne-halo" mood={EYE_MOOD[state] ?? 'idle'} />
       <div className="rinne-figure">
         {src ? (
           <img key={src} className="rinne-img" src={src} alt="" draggable={false} onError={handleError} />

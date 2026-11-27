@@ -547,15 +547,15 @@ export class WorkflowEngine extends EventEmitter {
               !actor.isConnectedAgent &&
               (run.executionMode === 'mock' || Boolean(actor.provider?.forceMock));
             const isApi = isApiProvider(actor.provider);
-            const connectedInfo = actor.isConnectedAgent
-              ? agentHub.getAgent(actor.id)
-              : undefined;
-            const isListeningAgent =
-              actor.isConnectedAgent && agentHub.isListening(actor.id);
+            const connHint = actor.isConnectedAgent
+              ? agentHub.getConnectionHint(actor.id)
+              : 'auto';
+            const isListeningAgent = connHint === 'listening';
+            const isReconnectingAgent = connHint === 'reconnecting';
+            const isBridgeAgent = connHint === 'bridge';
             const isManualAgent =
               actor.isConnectedAgent &&
-              !isListeningAgent &&
-              (!connectedInfo?.trigger || connectedInfo.trigger.type === 'manual');
+              (connHint === 'manual' || isReconnectingAgent || isBridgeAgent);
             const msg = this.pushMessage(run, {
               role: 'assistant',
               senderId: actor.id,
@@ -565,9 +565,13 @@ export class WorkflowEngine extends EventEmitter {
               stageTitle: actor.isConnectedAgent
                 ? isListeningAgent
                   ? '实时待命 · 自动响应'
-                  : isManualAgent
-                    ? '按需唤醒'
-                    : '自动拉起'
+                  : isReconnectingAgent
+                    ? '待命接单中'
+                    : isBridgeAgent
+                      ? '文件桥接 · 等待回执'
+                      : isManualAgent
+                        ? '等待接单'
+                        : '自动拉起'
                 : useMock
                   ? '群聊 · 模拟'
                   : isApi
@@ -590,6 +594,13 @@ export class WorkflowEngine extends EventEmitter {
               this.emit(`run:${run.id}`, run);
             };
 
+            const onClaimed = (via: 'wait' | 'pull' | 'progress' | 'bridge') => {
+              msg.wakePrompt = undefined;
+              msg.stageTitle =
+                via === 'bridge' ? '文件桥接 · 已回执' : '已接单 · 生成中';
+              this.emitUpdate(run);
+            };
+
             try {
               if (actor.isConnectedAgent) {
                 msg.commandPreview = `Agent 长轮询派单 → ${actor.shortName} (${actor.id})`;
@@ -605,7 +616,7 @@ export class WorkflowEngine extends EventEmitter {
                       : contentWithAttachments,
                     recentHistory,
                   },
-                  { signal: aborter.signal, onLog },
+                  { signal: aborter.signal, onLog, onClaimed },
                 );
               } else if (useMock) {
                 msg.commandPreview = isApi
@@ -649,10 +660,12 @@ ${contentWithAttachments}`;
                 msg.commandPreview = res.commandPreview;
                 msg.content = res.output;
               }
+              msg.wakePrompt = undefined;
               msg.status = 'done';
               msg.durationMs = Date.now() - startMs;
               this.emitUpdate(run);
             } catch (err) {
+              msg.wakePrompt = undefined;
               msg.status = 'error';
               msg.durationMs = Date.now() - startMs;
               msg.content = `回复失败：${err instanceof Error ? err.message : String(err)}`;
@@ -1068,15 +1081,12 @@ ${contentWithAttachments}`;
     state.providerUsed = actor ? actor.shortName : systemNodeLabel[node.kind] || node.providerId || '系统';
     state.usedMock = isModelNode ? useMock : false;
 
-    const connectedInfo = actor?.isConnectedAgent
-      ? agentHub.getAgent(actor.id)
-      : undefined;
-    const isListeningAgent =
-      Boolean(actor?.isConnectedAgent) && agentHub.isListening(actor!.id);
+    const connHint = actor?.isConnectedAgent
+      ? agentHub.getConnectionHint(actor.id)
+      : 'auto';
     const isManualAgent =
       Boolean(actor?.isConnectedAgent) &&
-      !isListeningAgent &&
-      (!connectedInfo?.trigger || connectedInfo.trigger.type === 'manual');
+      (connHint === 'manual' || connHint === 'reconnecting' || connHint === 'bridge');
 
     const chatMsg = this.pushMessage(run, {
       role: 'assistant',
@@ -1093,6 +1103,13 @@ ${contentWithAttachments}`;
         : undefined,
       status: 'streaming',
     });
+
+    const onNodeClaimed = () => {
+      if (chatMsg.wakePrompt) {
+        chatMsg.wakePrompt = undefined;
+        this.emitUpdate(run);
+      }
+    };
 
     this.emitUpdate(run, {
       type: 'node_started',
@@ -1120,12 +1137,13 @@ ${contentWithAttachments}`;
       } else if (node.kind === 'delay') {
         await this.executeDelayNode(run, node, useMock, signal);
       } else if (actor) {
-        await this.executeLlmNode(run, node, actor, useMock, signal);
+        await this.executeLlmNode(run, node, actor, useMock, signal, onNodeClaimed);
       }
 
       state.status = 'completed';
       state.finishedAt = new Date().toISOString();
       state.durationMs = Date.now() - startMs;
+      chatMsg.wakePrompt = undefined;
       chatMsg.status = 'done';
       chatMsg.content = state.output;
       chatMsg.logs = [...state.logs];
@@ -1174,6 +1192,7 @@ ${contentWithAttachments}`;
     },
     useMock: boolean,
     signal: AbortSignal,
+    onClaimed?: () => void,
   ): Promise<void> {
     const state = run.nodes[node.id];
     const [repoContext, gitSummary] = await Promise.all([
@@ -1221,6 +1240,7 @@ ${contentWithAttachments}`;
         {
           signal,
           onLog: (chunk) => this.appendNodeLog(run, node.id, chunk),
+          onClaimed,
         },
       );
       return;
