@@ -25,6 +25,7 @@ import {
   Pencil,
   Play,
   Plus,
+  Repeat,
   RotateCcw,
   Search,
   Settings2,
@@ -46,9 +47,12 @@ import type {
   ChatMessage,
   ConnectedAgent,
   ExecutionMode,
+  MemberQuotaConfig,
+  MemberUsageRecord,
   ProviderConfig,
   ProviderHealth,
   ThinkingLevel,
+  TokenUsage,
   WorkbenchConfig,
   WorkflowDefinition,
   WorkflowNodeConfig,
@@ -114,6 +118,50 @@ function formatTime(iso: string): string {
   }
 }
 
+function formatCompactTokens(n: number): string {
+  if (!Number.isFinite(n) || n <= 0) return '0';
+  if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(2)}M`;
+  if (n >= 10_000) return `${(n / 1_000).toFixed(1)}k`;
+  return n.toLocaleString('en-US');
+}
+
+function estimateInlineTokens(text: string): number {
+  const s = (text || '').trim();
+  if (!s) return 0;
+  let cjk = 0;
+  let other = 0;
+  for (let i = 0; i < s.length; i++) {
+    const code = s.charCodeAt(i);
+    if (
+      (code >= 0x4e00 && code <= 0x9fff) ||
+      (code >= 0x3400 && code <= 0x4dbf) ||
+      (code >= 0x3000 && code <= 0x30ff) ||
+      (code >= 0xff00 && code <= 0xffef)
+    ) {
+      cjk++;
+    } else {
+      other++;
+    }
+  }
+  return Math.max(1, Math.ceil(cjk * 0.72 + other / 3.8));
+}
+
+function formatTokenTooltip(u: TokenUsage): string {
+  const mode =
+    u.source === 'api'
+      ? '官方 API 精确计数'
+      : u.source === 'cli'
+        ? 'Claude CLI 官方 JSON 精确计数'
+        : u.source === 'agent' && !u.estimated
+          ? '成员主动上报精确计数'
+          : '本地中英字符校准估算（外部桌面客户端未开放原始计数）';
+  const costLine =
+    typeof u.costUsd === 'number' && u.costUsd > 0
+      ? `\n本次计费：$${u.costUsd.toFixed(4)}`
+      : '';
+  return `本次消耗：${u.estimated ? '~' : ''}${u.totalTokens.toLocaleString('en-US')} tokens\n输入：${u.inputTokens.toLocaleString('en-US')} · 输出：${u.outputTokens.toLocaleString('en-US')}${costLine}\n来源：${mode}`;
+}
+
 export const App: React.FC = () => {
   const [theme, setTheme] = useState<'light' | 'dark'>(() => {
     const saved = localStorage.getItem('ag_chat_theme');
@@ -135,6 +183,7 @@ export const App: React.FC = () => {
   const [providers, setProviders] = useState<ProviderConfig[]>([]);
   const [providerHealth, setProviderHealth] = useState<Record<string, ProviderHealth>>({});
   const [connectedAgents, setConnectedAgents] = useState<ConnectedAgent[]>([]);
+  const [memberUsage, setMemberUsage] = useState<Record<string, MemberUsageRecord>>({});
   const [runs, setRuns] = useState<WorkflowRun[]>([]);
   const [activeRun, setActiveRun] = useState<WorkflowRun | null>(null);
 
@@ -210,6 +259,16 @@ export const App: React.FC = () => {
   const [copiedId, setCopiedId] = useState('');
   const [expandedWakeIds, setExpandedWakeIds] = useState<Record<string, boolean>>({});
   const [wakeNowTick, setWakeNowTick] = useState(() => Date.now());
+  const [autoRelayRounds, setAutoRelayRounds] = useState<number>(() => {
+    const raw = localStorage.getItem('ag_auto_relay_rounds');
+    if (raw === null) return 4;
+    const parsed = Number(raw);
+    if (parsed === -1) return -1;
+    if (Number.isFinite(parsed) && parsed >= 0 && parsed <= 999) return Math.floor(parsed);
+    return 4;
+  });
+  const [showRelayMenu, setShowRelayMenu] = useState(false);
+  const [customRelayInput, setCustomRelayInput] = useState('8');
   const [toast, setToast] = useState('');
 
   const messagesEndRef = useRef<HTMLDivElement | null>(null);
@@ -236,6 +295,10 @@ export const App: React.FC = () => {
   useEffect(() => {
     localStorage.setItem('ag_rinne_visible', showRinne ? '1' : '0');
   }, [showRinne]);
+
+  useEffect(() => {
+    localStorage.setItem('ag_auto_relay_rounds', String(autoRelayRounds));
+  }, [autoRelayRounds]);
 
   const flash = useCallback((msg: string) => {
     setToast(msg);
@@ -264,8 +327,17 @@ export const App: React.FC = () => {
     }
   }, []);
 
+  const refreshMemberUsage = useCallback(async () => {
+    try {
+      const { usage } = await api.getUsage();
+      setMemberUsage(usage);
+    } catch {
+      // ignore
+    }
+  }, []);
+
   const loadInitial = useCallback(async () => {
-    const [wfRes, wfTplRes, provRes, runsRes, healthRes, agentsRes, wbRes] = await Promise.all([
+    const [wfRes, wfTplRes, provRes, runsRes, healthRes, agentsRes, wbRes, usageRes] = await Promise.all([
       api.getWorkflow(),
       api.listWorkflowTemplates().catch(() => ({ templates: [] })),
       api.getProviders(),
@@ -273,10 +345,12 @@ export const App: React.FC = () => {
       api.getHealth(),
       api.listAgents(),
       api.getWorkbench().catch(() => ({ workbench: null })),
+      api.getUsage().catch(() => ({ usage: {} as Record<string, MemberUsageRecord> })),
     ]);
     setWorkflow(wfRes.workflow);
     setWorkflowTemplates(wfTplRes.templates);
     if (wbRes.workbench) setWorkbench(wbRes.workbench);
+    setMemberUsage(usageRes.usage || {});
     setProviders(provRes.providers);
     setConnectedAgents(agentsRes.agents);
     prevOnlineIdsRef.current = new Set(
@@ -330,6 +404,22 @@ export const App: React.FC = () => {
     });
     return unsub;
   }, [activeRun?.id]);
+
+  const doneAssistantCount = useMemo(
+    () => (activeRun?.messages || []).filter((m) => m.role === 'assistant' && m.status === 'done').length,
+    [activeRun?.messages],
+  );
+  useEffect(() => {
+    if (doneAssistantCount > 0) {
+      void refreshMemberUsage();
+    }
+  }, [doneAssistantCount, refreshMemberUsage]);
+
+  useEffect(() => {
+    if (editingMember) {
+      void refreshMemberUsage();
+    }
+  }, [editingMember?.id, refreshMemberUsage]);
 
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth', block: 'end' });
@@ -1226,6 +1316,7 @@ export const App: React.FC = () => {
         mode,
         executionMode,
         repoPath,
+        autoRelayMaxRounds: mode === 'chat' ? autoRelayRounds : 0,
       });
       setActiveRun(run);
     } catch (err) {
@@ -1499,6 +1590,12 @@ export const App: React.FC = () => {
       ? `正在协作中…（${workingCount} 位成员工作中）`
       : RINNE_LINES[rinneState];
 
+  // Issue numbers: rooms in creation order, oldest = No.01
+  const issueNoById = new Map(
+    [...runs].sort((a, b) => a.createdAt.localeCompare(b.createdAt)).map((r, i) => [r.id, i + 1] as const),
+  );
+  const issueLabel = (id?: string) => `No.${String((id && issueNoById.get(id)) || runs.length + 1).padStart(2, '0')}`;
+
   // Journal cover: each room is one issue, the active workflow's steps are its contents
   const coverIssue: CoverIssue = (() => {
     const ordered = [...runs].sort((a, b) => a.createdAt.localeCompare(b.createdAt));
@@ -1769,6 +1866,7 @@ export const App: React.FC = () => {
                       if (r.repoPath) setRepoPath(r.repoPath);
                     }}
                   >
+                    <span className="studio-thread-no">{issueLabel(r.id)}</span>
                     <span className="studio-thread-title">{r.title}</span>
                     {runs.length > 1 && (
                       <button
@@ -2216,6 +2314,14 @@ export const App: React.FC = () => {
         {/* Editorial Centered Conversation Feed */}
         <div className="studio-feed">
           <div className="studio-feed-inner">
+            {!isFreshRoom && (
+              <header className="jr-running-head" aria-label="当前会话">
+                <span className="jr-rh-brand">{BRAND.title}</span>
+                <span>{issueLabel(activeRun?.id)}</span>
+                <span className="jr-rh-title">{activeRun?.title}</span>
+                <span className="jr-rh-count">{realMessages.length} 条消息</span>
+              </header>
+            )}
             {isFreshRoom ? (
               <JournalCover
                 showRinne={showRinne}
@@ -2312,6 +2418,40 @@ export const App: React.FC = () => {
                             ? ` · ${(msg.durationMs / 1000).toFixed(1)}s`
                             : ''}
                         </span>
+                        {msg.status === 'done' && (() => {
+                          const displayUsage: TokenUsage | null = msg.usage && msg.usage.totalTokens > 0
+                            ? msg.usage
+                            : msg.content?.trim()
+                              ? (() => {
+                                  const outTok = estimateInlineTokens(msg.content);
+                                  return {
+                                    inputTokens: 0,
+                                    outputTokens: outTok,
+                                    totalTokens: outTok,
+                                    estimated: true,
+                                    source: 'estimated',
+                                  };
+                                })()
+                              : null;
+                          if (!displayUsage) return null;
+                          const isLegacyOutOnly = !msg.usage;
+                          return (
+                            <span
+                              className={`studio-ai-token-pill ${displayUsage.estimated ? '' : 'is-exact'}`}
+                              title={
+                                isLegacyOutOnly
+                                  ? `历史回复正文估算：~${displayUsage.outputTokens.toLocaleString('en-US')} tokens（新发送的消息会记录完整输入+输出）`
+                                  : formatTokenTooltip(displayUsage)
+                              }
+                            >
+                              {displayUsage.estimated ? '~' : ''}
+                              {formatCompactTokens(displayUsage.totalTokens)} tok
+                              {!displayUsage.estimated && typeof displayUsage.costUsd === 'number' && displayUsage.costUsd > 0
+                                ? ` · $${displayUsage.costUsd.toFixed(3)}`
+                                : ''}
+                            </span>
+                          );
+                        })()}
                       </div>
 
                       <div
@@ -3180,6 +3320,93 @@ export const App: React.FC = () => {
               </div>
             )}
 
+            {showRelayMenu && (
+              <div className="relay-popover">
+                <div className="thinking-popover-head">
+                  <span>AI 互聊自动接力轮数</span>
+                  <button
+                    type="button"
+                    className="mini-icon-btn"
+                    onClick={() => setShowRelayMenu(false)}
+                  >
+                    ×
+                  </button>
+                </div>
+                <div className="relay-presets">
+                  {[
+                    { value: 0, label: '关闭 (单轮)' },
+                    { value: 2, label: '2 轮' },
+                    { value: 4, label: '4 轮' },
+                    { value: 6, label: '6 轮' },
+                    { value: 10, label: '10 轮' },
+                    { value: -1, label: '∞ 无限' },
+                  ].map((opt) => (
+                    <button
+                      key={opt.value}
+                      type="button"
+                      className={`relay-preset-btn ${autoRelayRounds === opt.value ? 'active' : ''} ${opt.value === -1 ? 'is-infinite' : ''}`}
+                      onClick={() => {
+                        setAutoRelayRounds(opt.value);
+                        flash(
+                          opt.value === -1
+                            ? '已开启 ∞ 无限互聊接力（可随时点红色停止按钮叫停）'
+                            : opt.value === 0
+                              ? '已关闭 AI 自动互聊接力（单轮模式）'
+                              : `已设置 AI 自动互聊上限：${opt.value} 轮`,
+                        );
+                      }}
+                    >
+                      {opt.label}
+                    </button>
+                  ))}
+                </div>
+                <div className="relay-custom-row">
+                  <span className="relay-custom-label">自定义轮数</span>
+                  <input
+                    type="number"
+                    min={1}
+                    max={999}
+                    className="relay-custom-input"
+                    value={customRelayInput}
+                    onChange={(e) => setCustomRelayInput(e.target.value)}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter') {
+                        e.preventDefault();
+                        const n = Math.floor(Number(customRelayInput));
+                        if (Number.isFinite(n) && n >= 1 && n <= 999) {
+                          setAutoRelayRounds(n);
+                          flash(`已设置 AI 自动互聊上限：${n} 轮`);
+                        }
+                      }
+                    }}
+                  />
+                  <button
+                    type="button"
+                    className="btn btn-sm"
+                    style={{ height: 26, fontSize: 11 }}
+                    onClick={() => {
+                      const n = Math.floor(Number(customRelayInput));
+                      if (Number.isFinite(n) && n >= 1 && n <= 999) {
+                        setAutoRelayRounds(n);
+                        flash(`已设置 AI 自动互聊上限：${n} 轮`);
+                      } else {
+                        flash('请输入 1 到 999 之间的整数');
+                      }
+                    }}
+                  >
+                    应用
+                  </button>
+                </div>
+                <div className="relay-hint-note">
+                  {autoRelayRounds === -1
+                    ? '⚡ 无限模式：模型只要在回复中互相 @对方就会持续接力，直到不再 @任何人，或随时点击右下角红色「停止」按钮立刻叫停。'
+                    : autoRelayRounds > 0
+                      ? `模型回复正文里 @其他在线成员 时自动接力下一轮（最多 ${autoRelayRounds} 轮），对话期间可随时点停止中断。`
+                      : '当前为单轮模式：仅响应你发送的消息，AI 之间不会自动接力。'}
+                </div>
+              </div>
+            )}
+
             {pendingAttachments.length > 0 && (
               <div className="composer-attachments">
                 {pendingAttachments.map((att) => {
@@ -3375,6 +3602,8 @@ export const App: React.FC = () => {
                   onClick={() => {
                     setShowQuickExtMenu((v) => !v);
                     setShowThinkingMenu(false);
+                    setShowRelayMenu(false);
+                    setShowWorkflowPicker(false);
                     setAttachMenuMode('closed');
                   }}
                   title="随手调用技能、运行插件或开关全局资料注入（也可在输入框打 / 唤起）"
@@ -3389,6 +3618,8 @@ export const App: React.FC = () => {
                     onClick={() => {
                       setShowThinkingMenu((v) => !v);
                       setShowQuickExtMenu(false);
+                      setShowRelayMenu(false);
+                      setShowWorkflowPicker(false);
                       setAttachMenuMode('closed');
                     }}
                     title="快捷调节各个模型的思考深度"
@@ -3397,11 +3628,32 @@ export const App: React.FC = () => {
                     <span>思考</span>
                   </button>
                 )}
+                <button
+                  type="button"
+                  className={`workflow-pill-btn relay-pill-btn ${showRelayMenu ? 'active' : ''} ${autoRelayRounds === -1 ? 'is-infinite' : autoRelayRounds > 0 ? 'is-enabled' : ''}`}
+                  onClick={() => {
+                    setShowRelayMenu((v) => !v);
+                    setShowQuickExtMenu(false);
+                    setShowThinkingMenu(false);
+                    setShowWorkflowPicker(false);
+                    setAttachMenuMode('closed');
+                  }}
+                  title="设置 AI 之间 @点名 自动互聊接力轮数（支持关闭 / 自定义 / ∞ 无限）"
+                >
+                  <Repeat size={13} />
+                  <span>
+                    {autoRelayRounds === -1
+                      ? '互聊 ∞'
+                      : autoRelayRounds > 0
+                        ? `互聊 ${autoRelayRounds}轮`
+                        : '互聊 关'}
+                  </span>
+                </button>
                 {isRunning ? (
                   <button
                     type="button"
                     className="send-circle stop"
-                    title="停止"
+                    title="停止当前回复 / 立刻中断互聊接力"
                     onClick={handleAbort}
                   >
                     <Square size={12} fill="currentColor" />
@@ -3415,6 +3667,7 @@ export const App: React.FC = () => {
                         setShowWorkflowPicker((v) => !v);
                         setShowQuickExtMenu(false);
                         setShowThinkingMenu(false);
+                        setShowRelayMenu(false);
                         setAttachMenuMode('closed');
                       }}
                       title="选择工作流模板、指定各节点模型并启动板块流程"
@@ -3584,16 +3837,68 @@ export const App: React.FC = () => {
         />
       )}
 
-      {editingMember && (
-        <MemberProfileModal
-          member={editingMember}
-          onClose={() => setEditingMember(null)}
-          onSave={(payload) => handleSaveMemberProfile(editingMember, payload)}
-          onToggleOnline={(nextOnline) =>
-            handleToggleMemberOnline(editingMember, nextOnline)
-          }
-        />
-      )}
+      {editingMember && (() => {
+        const matchedProv =
+          editingMember.kind === 'provider'
+            ? providers.find((p) => p.id === editingMember.id)
+            : undefined;
+        const matchedAgent =
+          editingMember.kind === 'agent'
+            ? connectedAgents.find((a) => a.id === editingMember.id)
+            : undefined;
+        const isClaudeCli = Boolean(matchedProv?.command?.toLowerCase().includes('claude'));
+        const isDirectApi = Boolean(matchedProv?.apiKey?.trim());
+        const isCreditsClient =
+          Boolean(matchedAgent?.relayName?.toLowerCase().includes('workbuddy')) ||
+          editingMember.id.includes('deepseek') ||
+          editingMember.name.toLowerCase().includes('workbuddy');
+        const channelTag = isDirectApi
+          ? '直连 API · 官方精确计数'
+          : isClaudeCli
+            ? 'Claude 订阅制 · 官方 JSON 精确计数'
+            : isCreditsClient
+              ? 'WorkBuddy 积分制'
+              : matchedAgent?.lastBridgeAt
+                ? 'AWS Quick 订阅制 · 文件桥接'
+                : editingMember.kind === 'agent'
+                  ? '订阅制桌面端'
+                  : '本地订阅 CLI';
+        const defaultQuotaMode = isDirectApi
+          ? 'tokens'
+          : isCreditsClient
+            ? 'credits'
+            : 'subscription';
+        const memberWithMeta: EditableMember = {
+          ...editingMember,
+          hasApiKey: isDirectApi,
+          channelTag,
+          defaultQuotaMode,
+        };
+        return (
+          <MemberProfileModal
+            member={memberWithMeta}
+            usage={memberUsage[editingMember.id]}
+            onClose={() => setEditingMember(null)}
+            onSave={(payload) => handleSaveMemberProfile(editingMember, payload)}
+            onToggleOnline={(nextOnline) =>
+              handleToggleMemberOnline(editingMember, nextOnline)
+            }
+            onSaveQuota={async (quotaPatch: Partial<MemberQuotaConfig>) => {
+              const { usage } = await api.updateMemberQuota(editingMember.id, quotaPatch);
+              setMemberUsage(usage);
+            }}
+            onResetUsage={async () => {
+              const { usage } = await api.resetMemberUsage(editingMember.id);
+              setMemberUsage(usage);
+            }}
+            onRefreshBalance={async () => {
+              const res = await api.refreshMemberBalance(editingMember.id);
+              if (res.usage) setMemberUsage(res.usage);
+              return res;
+            }}
+          />
+        );
+      })()}
 
       {workbenchTab && (
         <WorkbenchModal

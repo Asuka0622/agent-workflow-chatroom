@@ -1,5 +1,6 @@
-import type { ProviderConfig } from '../shared/types.js';
+import type { ProviderConfig, TokenUsage } from '../shared/types.js';
 import type { RunCliResult } from './cliRunner.js';
+import { normalizeTokenUsage } from './tokenEstimator.js';
 
 export interface RunApiOptions {
   signal?: AbortSignal;
@@ -67,7 +68,7 @@ async function runOpenAiCompatible(
 
   let data: {
     choices?: Array<{ message?: { content?: string; reasoning_content?: string } }>;
-    usage?: { prompt_tokens?: number; completion_tokens?: number };
+    usage?: { prompt_tokens?: number; completion_tokens?: number; total_tokens?: number };
   };
   try {
     data = JSON.parse(rawText);
@@ -77,15 +78,21 @@ async function runOpenAiCompatible(
 
   const msg = data.choices?.[0]?.message;
   const content = msg?.content?.trim() || '';
+  const usage: TokenUsage = normalizeTokenUsage(
+    data.usage,
+    { inputText: prompt, outputText: content },
+    'api',
+  );
   if (data.usage) {
     options.onLog?.(
-      `[API] 完成（输入 ${data.usage.prompt_tokens ?? '?'} tokens / 输出 ${data.usage.completion_tokens ?? '?'} tokens）\n`,
+      `[API] 完成（输入 ${usage.inputTokens} tokens / 输出 ${usage.outputTokens} tokens / 合计 ${usage.totalTokens}）\n`,
     );
   }
   return {
     output: content || '（API 返回空内容）',
     exitCode: 0,
     commandPreview,
+    usage,
   };
 }
 
@@ -161,15 +168,21 @@ async function runAnthropicApi(
     .join('\n')
     .trim();
 
+  const usage: TokenUsage = normalizeTokenUsage(
+    data.usage,
+    { inputText: prompt, outputText: text },
+    'api',
+  );
   if (data.usage) {
     options.onLog?.(
-      `[Anthropic API] 完成（输入 ${data.usage.input_tokens ?? '?'} / 输出 ${data.usage.output_tokens ?? '?'} tokens）\n`,
+      `[Anthropic API] 完成（输入 ${usage.inputTokens} / 输出 ${usage.outputTokens} / 合计 ${usage.totalTokens} tokens）\n`,
     );
   }
   return {
     output: text || '（Anthropic API 返回空内容）',
     exitCode: 0,
     commandPreview,
+    usage,
   };
 }
 
@@ -231,17 +244,36 @@ async function runGeminiApi(
 
   const data = JSON.parse(rawText) as {
     candidates?: Array<{ content?: { parts?: Array<{ text?: string }> } }>;
+    usageMetadata?: {
+      promptTokenCount?: number;
+      candidatesTokenCount?: number;
+      totalTokenCount?: number;
+    };
   };
   const text = (data.candidates?.[0]?.content?.parts || [])
     .map((p) => p.text || '')
     .join('\n')
     .trim();
 
-  options.onLog?.('[Gemini API] 请求完成。\n');
+  const usage: TokenUsage = normalizeTokenUsage(
+    data.usageMetadata
+      ? {
+          inputTokens: data.usageMetadata.promptTokenCount,
+          outputTokens: data.usageMetadata.candidatesTokenCount,
+          totalTokens: data.usageMetadata.totalTokenCount,
+        }
+      : undefined,
+    { inputText: prompt, outputText: text },
+    'api',
+  );
+  options.onLog?.(
+    `[Gemini API] 请求完成（输入 ${usage.inputTokens} / 输出 ${usage.outputTokens} / 合计 ${usage.totalTokens} tokens）。\n`,
+  );
   return {
     output: text || '（Gemini API 返回空内容）',
     exitCode: 0,
     commandPreview,
+    usage,
   };
 }
 

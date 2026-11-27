@@ -4,6 +4,8 @@ import type {
   ChatSendPayload,
   ConnectedAgent,
   CreateRunPayload,
+  MemberQuotaConfig,
+  MemberUsageRecord,
   ProviderConfig,
   ProviderHealth,
   WorkbenchConfig,
@@ -316,6 +318,37 @@ export const api = {
 
   stopAgentStandby: (id: string) =>
     request<{ ok: boolean; stopped: boolean }>(`/api/agents/${id}/stop-standby`, {
+      method: 'POST',
+    }),
+
+  getUsage: () => request<{ usage: Record<string, MemberUsageRecord> }>('/api/usage'),
+
+  updateMemberQuota: (memberId: string, quota: Partial<MemberQuotaConfig>) =>
+    request<{ record: MemberUsageRecord; usage: Record<string, MemberUsageRecord> }>(
+      `/api/usage/${encodeURIComponent(memberId)}/quota`,
+      {
+        method: 'PATCH',
+        body: JSON.stringify(quota),
+      },
+    ),
+
+  resetMemberUsage: (memberId: string) =>
+    request<{ record: MemberUsageRecord; usage: Record<string, MemberUsageRecord> }>(
+      `/api/usage/${encodeURIComponent(memberId)}/reset`,
+      {
+        method: 'POST',
+      },
+    ),
+
+  refreshMemberBalance: (memberId: string) =>
+    request<{
+      ok: boolean;
+      supported?: boolean;
+      balanceLabel?: string;
+      message?: string;
+      record?: MemberUsageRecord;
+      usage?: Record<string, MemberUsageRecord>;
+    }>(`/api/usage/${encodeURIComponent(memberId)}/refresh-balance`, {
       method: 'POST',
     }),
 

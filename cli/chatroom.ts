@@ -611,12 +611,41 @@ async function main(): Promise<void> {
     }
     if (!content) throw new Error('请提供回复内容，例如：chatroom reply "已完成" 或通过 --stdin / --file 传入');
 
+    const inputTokensRaw = strFlag(flags, 'input-tokens');
+    const outputTokensRaw = strFlag(flags, 'output-tokens');
+    const totalTokensRaw = strFlag(flags, 'total-tokens');
+    const creditsUsedRaw = strFlag(flags, 'credits-used');
+    const remainingLabel = strFlag(flags, 'remaining');
+    const usedPctRaw = strFlag(flags, 'used-pct');
+    const resetAtLabel = strFlag(flags, 'reset-at');
+    const creditRemainingRaw = strFlag(flags, 'credits-remaining');
+    const creditTotalRaw = strFlag(flags, 'credits-total');
+    const usage =
+      inputTokensRaw || outputTokensRaw || totalTokensRaw || creditsUsedRaw
+        ? {
+            inputTokens: inputTokensRaw ? Number(inputTokensRaw) : undefined,
+            outputTokens: outputTokensRaw ? Number(outputTokensRaw) : undefined,
+            totalTokens: totalTokensRaw ? Number(totalTokensRaw) : undefined,
+            creditsUsed: creditsUsedRaw ? Number(creditsUsedRaw) : undefined,
+          }
+        : undefined;
+
     const res = await apiReq<{ ok: boolean; resolvedTask: boolean }>(
       baseUrl,
       `/api/agent/${encodeURIComponent(agentId)}/reply`,
       {
         method: 'POST',
-        body: JSON.stringify({ taskId, roomId, content }),
+        body: JSON.stringify({
+          taskId,
+          roomId,
+          content,
+          usage,
+          remainingLabel,
+          usedPercent: usedPctRaw !== undefined ? Number(usedPctRaw) : undefined,
+          resetAtLabel,
+          creditRemaining: creditRemainingRaw !== undefined ? Number(creditRemainingRaw) : undefined,
+          creditTotal: creditTotalRaw !== undefined ? Number(creditTotalRaw) : undefined,
+        }),
       },
     );
     printOutput(res, asJson, () => {

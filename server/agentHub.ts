@@ -9,7 +9,9 @@ import type {
   ConnectedAgent,
   ProviderConfig,
   ThinkingLevel,
+  TokenUsage,
 } from '../shared/types.js';
+import { normalizeTokenUsage } from './tokenEstimator.js';
 import { runProviderCli } from './cliRunner.js';
 import { loadSavedAgents, saveAgentsList } from './store.js';
 
@@ -56,6 +58,7 @@ interface PendingDispatch {
   reject: (err: Error) => void;
   onLog?: (chunk: string) => void;
   onClaimed?: (via: 'wait' | 'pull' | 'progress' | 'bridge') => void;
+  onUsage?: (usage: TokenUsage) => void;
   claimed?: boolean;
   timer: NodeJS.Timeout;
 }
@@ -210,6 +213,7 @@ export class AgentHub extends EventEmitter {
 
             let content = '';
             let parsedTaskId: string | undefined = taskId;
+            let parsedUsage: Partial<TokenUsage> | undefined;
             if (filePath.endsWith('.json')) {
               try {
                 const obj = JSON.parse(raw) as {
@@ -218,12 +222,16 @@ export class AgentHub extends EventEmitter {
                   reply?: string;
                   message?: string;
                   text?: string;
+                  usage?: Partial<TokenUsage>;
                 };
                 if (filePath === latestJson && obj.taskId && obj.taskId !== taskId) {
                   continue;
                 }
                 parsedTaskId = obj.taskId || taskId;
                 content = (obj.content || obj.reply || obj.message || obj.text || '').trim();
+                if (obj.usage && typeof obj.usage === 'object') {
+                  parsedUsage = obj.usage;
+                }
               } catch {
                 continue;
               }
@@ -245,7 +253,7 @@ export class AgentHub extends EventEmitter {
             entry.info.lastBridgeAt = new Date().toISOString();
             this.markClaimed(active, 'bridge');
             active.onLog?.(`[文件桥接回执] 已读取 ${path.basename(filePath)} 并自动提交到群聊。\n`);
-            this.submitReply(agentId, { taskId: parsedTaskId, content });
+            this.submitReply(agentId, { taskId: parsedTaskId, content, usage: parsedUsage });
             break;
           } catch {
             // ignore transient read lock
@@ -564,6 +572,7 @@ export class AgentHub extends EventEmitter {
       signal?: AbortSignal;
       onLog?: (chunk: string) => void;
       onClaimed?: (via: 'wait' | 'pull' | 'progress' | 'bridge') => void;
+      onUsage?: (usage: TokenUsage) => void;
     },
   ): Promise<string> {
     this.ensureHydrated();
@@ -717,6 +726,7 @@ export class AgentHub extends EventEmitter {
         },
         onLog: options?.onLog,
         onClaimed: options?.onClaimed,
+        onUsage: options?.onUsage,
         claimed: false,
         timer,
       };
@@ -863,7 +873,20 @@ export class AgentHub extends EventEmitter {
     return true;
   }
 
-  submitReply(agentId: string, params: { taskId?: string; content: string }): boolean {
+  submitReply(
+    agentId: string,
+    params: {
+      taskId?: string;
+      content: string;
+      usage?: Partial<TokenUsage> & {
+        prompt_tokens?: number;
+        completion_tokens?: number;
+        total_tokens?: number;
+        input_tokens?: number;
+        output_tokens?: number;
+      };
+    },
+  ): boolean {
     this.ensureHydrated();
     const entry = this.agents.get(agentId);
     if (!entry) {
@@ -878,9 +901,21 @@ export class AgentHub extends EventEmitter {
     if (!active) {
       return false;
     }
+    const finalContent = params.content.trim() || '（空回复）';
+    if (params.usage && active.onUsage) {
+      const normalized = normalizeTokenUsage(
+        params.usage,
+        {
+          inputText: `${active.task.recentHistory || ''}\n${active.task.prompt || ''}`,
+          outputText: finalContent,
+        },
+        'agent',
+      );
+      active.onUsage(normalized);
+    }
     entry.queue = entry.queue.filter((t) => t.taskId !== active.task.taskId);
     this.removeBridgeTaskFile(agentId, active.task.taskId);
-    active.resolve(params.content.trim() || '（空回复）');
+    active.resolve(finalContent);
     return true;
   }
 

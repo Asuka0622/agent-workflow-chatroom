@@ -10,7 +10,9 @@ import type {
   ChatSendPayload,
   ConnectedAgent,
   CreateRunPayload,
+  MemberQuotaConfig,
   ProviderConfig,
+  TokenUsage,
   WorkbenchConfig,
   WorkflowDefinition,
   WorkflowPresetTemplate,
@@ -28,16 +30,19 @@ import {
   deleteRun,
   getUploadsDir,
   listRuns,
+  loadMemberUsage,
   loadProviders,
   loadWorkbench,
   loadWorkflow,
   loadWorkflowTemplates,
+  resetMemberUsage,
   resetWorkflow,
   saveProviders,
   saveUploadedFile,
   saveWorkbench,
   saveWorkflow,
   saveWorkflowTemplates,
+  updateMemberQuota,
 } from './store.js';
 import { testWorkbenchPlugin, workbenchScheduler } from './workbench.js';
 
@@ -384,15 +389,58 @@ export function createApp(options?: { distDir?: string; portHint?: number; host?
       message?: string;
       text?: string;
       roomId?: string;
+      usage?: Partial<TokenUsage> & {
+        prompt_tokens?: number;
+        completion_tokens?: number;
+        total_tokens?: number;
+        input_tokens?: number;
+        output_tokens?: number;
+      };
+      remainingLabel?: string;
+      usedPercent?: number;
+      resetAtLabel?: string;
+      creditRemaining?: number;
+      creditTotal?: number;
     };
     const content = (body.content || body.reply || body.message || body.text || '').trim();
-    const { taskId, roomId } = body;
+    const {
+      taskId,
+      roomId,
+      usage,
+      remainingLabel,
+      usedPercent,
+      resetAtLabel,
+      creditRemaining,
+      creditTotal,
+    } = body;
     if (!content) {
       res.status(400).json({ error: '请提供回复内容 content' });
       return;
     }
     try {
-      const resolved = agentHub.submitReply(req.params.agentId, { taskId, content });
+      const quotaUpdate: Partial<MemberQuotaConfig> = {};
+      if (remainingLabel && remainingLabel.trim()) {
+        quotaUpdate.balanceLabel = remainingLabel.trim().slice(0, 60);
+        quotaUpdate.balanceCheckedAt = new Date().toISOString();
+      }
+      if (typeof usedPercent === 'number' && Number.isFinite(usedPercent)) {
+        quotaUpdate.mode = 'subscription';
+        quotaUpdate.usedPercent = usedPercent;
+        if (resetAtLabel?.trim()) quotaUpdate.resetAtLabel = resetAtLabel.trim().slice(0, 32);
+        quotaUpdate.balanceCheckedAt = new Date().toISOString();
+      }
+      if (typeof creditRemaining === 'number' && Number.isFinite(creditRemaining)) {
+        quotaUpdate.mode = 'credits';
+        quotaUpdate.creditRemaining = creditRemaining;
+        if (typeof creditTotal === 'number' && Number.isFinite(creditTotal) && creditTotal > 0) {
+          quotaUpdate.creditTotal = creditTotal;
+        }
+        quotaUpdate.balanceCheckedAt = new Date().toISOString();
+      }
+      if (Object.keys(quotaUpdate).length > 0) {
+        updateMemberQuota(req.params.agentId, quotaUpdate);
+      }
+      const resolved = agentHub.submitReply(req.params.agentId, { taskId, content, usage });
       if (!resolved) {
         // Fallback: post as a proactive room message if no pending task matched
         const fallbackRoom = roomId || agentHub.getAgent(req.params.agentId)?.roomId || listRuns()[0]?.id;
@@ -403,6 +451,114 @@ export function createApp(options?: { distDir?: string; portHint?: number; host?
       res.json({ ok: true, resolvedTask: resolved });
     } catch (err) {
       res.status(404).json({ error: err instanceof Error ? err.message : String(err) });
+    }
+  });
+
+  // ===== Member Token Usage & Quota Telemetry =====
+  app.get('/api/usage', (_req, res) => {
+    res.json({ usage: loadMemberUsage() });
+  });
+
+  app.patch('/api/usage/:memberId/quota', (req, res) => {
+    const patch = (req.body || {}) as Partial<MemberQuotaConfig>;
+    const record = updateMemberQuota(req.params.memberId, {
+      mode: patch.mode,
+      usedPercent: patch.usedPercent,
+      secondaryLabel:
+        patch.secondaryLabel !== undefined ? patch.secondaryLabel.trim() || undefined : undefined,
+      secondaryUsedPercent: patch.secondaryUsedPercent,
+      resetAtLabel:
+        patch.resetAtLabel !== undefined ? patch.resetAtLabel.trim() || undefined : undefined,
+      creditUnit: patch.creditUnit !== undefined ? patch.creditUnit.trim() || '积分' : undefined,
+      creditTotal: patch.creditTotal,
+      creditRemaining: patch.creditRemaining,
+      creditPerCall: patch.creditPerCall,
+      tokenLimit: patch.tokenLimit,
+      callLimit: patch.callLimit,
+      periodLabel: patch.periodLabel !== undefined ? patch.periodLabel.trim() || undefined : undefined,
+      balanceLabel: patch.balanceLabel !== undefined ? patch.balanceLabel.trim() || undefined : undefined,
+      balanceCheckedAt:
+        patch.balanceLabel || patch.usedPercent !== undefined || patch.creditRemaining !== undefined
+          ? new Date().toISOString()
+          : undefined,
+    });
+    res.json({ record, usage: loadMemberUsage() });
+  });
+
+  app.post('/api/usage/:memberId/reset', (req, res) => {
+    const record = resetMemberUsage(req.params.memberId);
+    res.json({ record, usage: loadMemberUsage() });
+  });
+
+  app.post('/api/usage/:memberId/refresh-balance', async (req, res) => {
+    const memberId = req.params.memberId;
+    const provider = loadProviders().find((p) => p.id === memberId);
+    if (!provider || !provider.apiKey?.trim()) {
+      res.json({
+        ok: false,
+        supported: false,
+        message: '外部桌面/订阅模型未向本地开放余额接口，可在下方设置预算额度追踪剩余用量。',
+      });
+      return;
+    }
+
+    const baseUrl = (provider.apiBaseUrl || '').trim().toLowerCase();
+    const apiKey = provider.apiKey.trim();
+    try {
+      if (baseUrl.includes('deepseek.com')) {
+        const resp = await fetch('https://api.deepseek.com/user/balance', {
+          headers: { Authorization: `Bearer ${apiKey}` },
+          signal: AbortSignal.timeout(8000),
+        });
+        if (!resp.ok) throw new Error(`DeepSeek 余额接口返回 ${resp.status}`);
+        const data = (await resp.json()) as {
+          is_available?: boolean;
+          balance_infos?: Array<{ currency?: string; total_balance?: string }>;
+        };
+        const first = data.balance_infos?.[0];
+        const label = first
+          ? `${first.currency || 'CNY'} ${first.total_balance ?? '0'}`
+          : data.is_available
+            ? '可用'
+            : '余额不足';
+        const record = updateMemberQuota(memberId, {
+          balanceLabel: label,
+          balanceCheckedAt: new Date().toISOString(),
+        });
+        res.json({ ok: true, supported: true, balanceLabel: label, record, usage: loadMemberUsage() });
+        return;
+      }
+
+      if (baseUrl.includes('openrouter.ai')) {
+        const resp = await fetch('https://openrouter.ai/api/v1/credits', {
+          headers: { Authorization: `Bearer ${apiKey}` },
+          signal: AbortSignal.timeout(8000),
+        });
+        if (!resp.ok) throw new Error(`OpenRouter 余额接口返回 ${resp.status}`);
+        const data = (await resp.json()) as {
+          data?: { total_credits?: number; total_usage?: number };
+        };
+        const remain = Math.max(0, (data.data?.total_credits ?? 0) - (data.data?.total_usage ?? 0));
+        const label = `USD $${remain.toFixed(4)} 剩余`;
+        const record = updateMemberQuota(memberId, {
+          balanceLabel: label,
+          balanceCheckedAt: new Date().toISOString(),
+        });
+        res.json({ ok: true, supported: true, balanceLabel: label, record, usage: loadMemberUsage() });
+        return;
+      }
+
+      res.json({
+        ok: false,
+        supported: false,
+        message: '该 API 服务商暂未提供公开余额查询接口（目前自动支持 DeepSeek / OpenRouter），可使用下方预算额度追踪剩余量。',
+      });
+    } catch (err) {
+      res.status(502).json({
+        ok: false,
+        supported: true,
+        message: err instanceof Error ? err.message : '余额查询失败',
+      });
     }
   });
 

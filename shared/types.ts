@@ -183,6 +183,53 @@ export interface ChatAttachment {
   textContent?: string;
 }
 
+export interface TokenUsage {
+  inputTokens: number;
+  outputTokens: number;
+  totalTokens: number;
+  cacheReadTokens?: number;
+  costUsd?: number;
+  creditsUsed?: number;
+  estimated?: boolean;
+  source?: 'api' | 'cli' | 'agent' | 'estimated';
+}
+
+export type QuotaTrackMode = 'subscription' | 'credits' | 'calls' | 'tokens';
+
+export interface MemberQuotaConfig {
+  mode?: QuotaTrackMode;
+  /** Subscription official usage window (e.g. Claude Pro 5h / Gemini / AWS Quick) */
+  usedPercent?: number;
+  secondaryLabel?: string;
+  secondaryUsedPercent?: number;
+  resetAtLabel?: string;
+  /** Official credits / points (e.g. WorkBuddy 积分 / Cursor Credits) */
+  creditUnit?: string;
+  creditTotal?: number;
+  creditRemaining?: number;
+  creditPerCall?: number;
+  /** Token / call budgets */
+  tokenLimit?: number;
+  callLimit?: number;
+  periodLabel?: string;
+  balanceLabel?: string;
+  balanceCheckedAt?: string;
+  updatedAt?: string;
+}
+
+export interface MemberUsageRecord {
+  memberId: string;
+  calls: number;
+  inputTokens: number;
+  outputTokens: number;
+  totalTokens: number;
+  exactTokens: number;
+  estimatedTokens: number;
+  totalCostUsd?: number;
+  lastUsedAt?: string;
+  quota?: MemberQuotaConfig;
+}
+
 export interface ChatMessage {
   id: string;
   role: 'user' | 'assistant' | 'system';
@@ -197,6 +244,7 @@ export interface ChatMessage {
   logs: string[];
   commandPreview?: string;
   wakePrompt?: string;
+  usage?: TokenUsage;
   status: 'streaming' | 'done' | 'error';
   durationMs?: number;
   createdAt: string;
@@ -251,6 +299,8 @@ export interface ChatSendPayload {
   workflowTemplateId?: string;
   executionMode?: ExecutionMode;
   repoPath?: string;
+  /** Max AI-to-AI @mention auto-relay rounds: 0 = off, >0 = N rounds, -1 = unlimited */
+  autoRelayMaxRounds?: number;
 }
 
 export type AgentTrigger =

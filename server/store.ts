@@ -6,12 +6,16 @@ import { DEFAULT_WORKFLOW } from '../shared/defaultWorkflow.js';
 import { BUILTIN_WORKFLOW_TEMPLATES } from '../shared/defaultWorkflowTemplates.js';
 import type {
   ConnectedAgent,
+  MemberQuotaConfig,
+  MemberUsageRecord,
   ProviderConfig,
+  TokenUsage,
   WorkbenchConfig,
   WorkflowDefinition,
   WorkflowPresetTemplate,
   WorkflowRun,
 } from '../shared/types.js';
+import { estimateTextTokens } from './tokenEstimator.js';
 
 function getDataDir(): string {
   return process.env.AGENT_WORKFLOW_DATA_DIR
@@ -29,6 +33,7 @@ function getPaths() {
     workflowTemplatesFile: path.join(dataDir, 'workflow-templates.json'),
     agentsFile: path.join(dataDir, 'agents.json'),
     workbenchFile: path.join(dataDir, 'workbench.json'),
+    usageFile: path.join(dataDir, 'usage.json'),
   };
 }
 
@@ -117,6 +122,177 @@ export function loadSavedAgents(): ConnectedAgent[] {
 export function saveAgentsList(agents: ConnectedAgent[]): void {
   ensureDirs();
   fs.writeFileSync(getPaths().agentsFile, JSON.stringify(agents, null, 2), 'utf8');
+}
+
+export function loadMemberUsage(): Record<string, MemberUsageRecord> {
+  ensureDirs();
+  const { usageFile } = getPaths();
+  if (fs.existsSync(usageFile)) {
+    try {
+      const parsed = JSON.parse(fs.readFileSync(usageFile, 'utf8')) as Record<
+        string,
+        MemberUsageRecord
+      >;
+      if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
+        return parsed;
+      }
+    } catch {
+      // fall through to rebuild
+    }
+  }
+
+  // First-time backfill from existing saved runs so current members show historical estimates right away
+  const backfilled: Record<string, MemberUsageRecord> = {};
+  try {
+    for (const run of listRuns()) {
+      for (const msg of run.messages || []) {
+        if (msg.role !== 'assistant' || msg.status !== 'done' || !msg.senderId) continue;
+        const outTok = msg.usage?.outputTokens ?? estimateTextTokens(msg.content || '');
+        const inTok = msg.usage?.inputTokens ?? Math.max(60, Math.round(outTok * 1.4));
+        const total = msg.usage?.totalTokens ?? inTok + outTok;
+        const isEst = msg.usage ? Boolean(msg.usage.estimated) : true;
+        const cur = backfilled[msg.senderId] || {
+          memberId: msg.senderId,
+          calls: 0,
+          inputTokens: 0,
+          outputTokens: 0,
+          totalTokens: 0,
+          exactTokens: 0,
+          estimatedTokens: 0,
+        };
+        cur.calls += 1;
+        cur.inputTokens += inTok;
+        cur.outputTokens += outTok;
+        cur.totalTokens += total;
+        if (isEst) cur.estimatedTokens += total;
+        else cur.exactTokens += total;
+        if (!cur.lastUsedAt || (msg.createdAt && msg.createdAt > cur.lastUsedAt)) {
+          cur.lastUsedAt = msg.createdAt;
+        }
+        backfilled[msg.senderId] = cur;
+      }
+    }
+  } catch {
+    // ignore backfill errors
+  }
+  saveMemberUsage(backfilled);
+  return backfilled;
+}
+
+export function saveMemberUsage(map: Record<string, MemberUsageRecord>): void {
+  ensureDirs();
+  fs.writeFileSync(getPaths().usageFile, JSON.stringify(map, null, 2), 'utf8');
+}
+
+export function recordMemberUsage(memberId: string, usage: TokenUsage): MemberUsageRecord {
+  const all = loadMemberUsage();
+  const cur = all[memberId] || {
+    memberId,
+    calls: 0,
+    inputTokens: 0,
+    outputTokens: 0,
+    totalTokens: 0,
+    exactTokens: 0,
+    estimatedTokens: 0,
+  };
+  cur.calls += 1;
+  cur.inputTokens += Math.max(0, Math.round(usage.inputTokens || 0));
+  cur.outputTokens += Math.max(0, Math.round(usage.outputTokens || 0));
+  const total = Math.max(0, Math.round(usage.totalTokens || 0));
+  cur.totalTokens += total;
+  if (usage.estimated) cur.estimatedTokens += total;
+  else cur.exactTokens += total;
+  if (typeof usage.costUsd === 'number' && Number.isFinite(usage.costUsd) && usage.costUsd > 0) {
+    cur.totalCostUsd = Number(((cur.totalCostUsd || 0) + usage.costUsd).toFixed(6));
+  }
+  if (cur.quota && typeof cur.quota.creditRemaining === 'number' && Number.isFinite(cur.quota.creditRemaining)) {
+    const deduct =
+      typeof usage.creditsUsed === 'number' && Number.isFinite(usage.creditsUsed) && usage.creditsUsed > 0
+        ? usage.creditsUsed
+        : typeof cur.quota.creditPerCall === 'number' && Number.isFinite(cur.quota.creditPerCall) && cur.quota.creditPerCall > 0
+          ? cur.quota.creditPerCall
+          : 0;
+    if (deduct > 0) {
+      cur.quota.creditRemaining = Math.max(0, Number((cur.quota.creditRemaining - deduct).toFixed(2)));
+      cur.quota.updatedAt = new Date().toISOString();
+    }
+  }
+  cur.lastUsedAt = new Date().toISOString();
+  all[memberId] = cur;
+  saveMemberUsage(all);
+  return cur;
+}
+
+export function updateMemberQuota(
+  memberId: string,
+  quotaPatch: Partial<MemberQuotaConfig>,
+): MemberUsageRecord {
+  const all = loadMemberUsage();
+  const cur = all[memberId] || {
+    memberId,
+    calls: 0,
+    inputTokens: 0,
+    outputTokens: 0,
+    totalTokens: 0,
+    exactTokens: 0,
+    estimatedTokens: 0,
+  };
+  const nextQuota: MemberQuotaConfig = {
+    ...(cur.quota || {}),
+    ...quotaPatch,
+    updatedAt: new Date().toISOString(),
+  };
+  if (nextQuota.tokenLimit !== undefined && (!Number.isFinite(nextQuota.tokenLimit) || nextQuota.tokenLimit <= 0)) {
+    delete nextQuota.tokenLimit;
+  }
+  if (nextQuota.callLimit !== undefined && (!Number.isFinite(nextQuota.callLimit) || nextQuota.callLimit <= 0)) {
+    delete nextQuota.callLimit;
+  }
+  if (nextQuota.usedPercent !== undefined) {
+    if (!Number.isFinite(nextQuota.usedPercent) || nextQuota.usedPercent < 0) {
+      delete nextQuota.usedPercent;
+    } else {
+      nextQuota.usedPercent = Math.min(100, Math.max(0, Number(nextQuota.usedPercent.toFixed(1))));
+    }
+  }
+  if (nextQuota.secondaryUsedPercent !== undefined) {
+    if (!Number.isFinite(nextQuota.secondaryUsedPercent) || nextQuota.secondaryUsedPercent < 0) {
+      delete nextQuota.secondaryUsedPercent;
+    } else {
+      nextQuota.secondaryUsedPercent = Math.min(100, Math.max(0, Number(nextQuota.secondaryUsedPercent.toFixed(1))));
+    }
+  }
+  if (nextQuota.creditTotal !== undefined && (!Number.isFinite(nextQuota.creditTotal) || nextQuota.creditTotal <= 0)) {
+    delete nextQuota.creditTotal;
+  }
+  if (nextQuota.creditRemaining !== undefined && (!Number.isFinite(nextQuota.creditRemaining) || nextQuota.creditRemaining < 0)) {
+    delete nextQuota.creditRemaining;
+  }
+  if (nextQuota.creditPerCall !== undefined && (!Number.isFinite(nextQuota.creditPerCall) || nextQuota.creditPerCall <= 0)) {
+    delete nextQuota.creditPerCall;
+  }
+  cur.quota = nextQuota;
+  all[memberId] = cur;
+  saveMemberUsage(all);
+  return cur;
+}
+
+export function resetMemberUsage(memberId: string): MemberUsageRecord {
+  const all = loadMemberUsage();
+  const prevQuota = all[memberId]?.quota;
+  const resetRec: MemberUsageRecord = {
+    memberId,
+    calls: 0,
+    inputTokens: 0,
+    outputTokens: 0,
+    totalTokens: 0,
+    exactTokens: 0,
+    estimatedTokens: 0,
+    quota: prevQuota,
+  };
+  all[memberId] = resetRec;
+  saveMemberUsage(all);
+  return resetRec;
 }
 
 function ensureDirs(): void {

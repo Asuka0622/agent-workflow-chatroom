@@ -2,7 +2,7 @@ import { execFile, spawn } from 'node:child_process';
 import fs from 'node:fs';
 import path from 'node:path';
 import { promisify } from 'node:util';
-import type { AgentTrigger, ProviderConfig, ProviderHealth } from '../shared/types.js';
+import type { AgentTrigger, ProviderConfig, ProviderHealth, TokenUsage } from '../shared/types.js';
 
 const execFileAsync = promisify(execFile);
 const IS_WIN = process.platform === 'win32';
@@ -17,6 +17,7 @@ export interface RunCliResult {
   output: string;
   exitCode: number;
   commandPreview: string;
+  usage?: TokenUsage;
 }
 
 export async function resolveCommandPath(cmd: string): Promise<string | undefined> {
@@ -273,12 +274,27 @@ export function runProviderCli(
   options: RunCliOptions,
 ): Promise<RunCliResult> {
   const args = [...provider.args];
+  const cmdLower = provider.command.toLowerCase();
+  const isClaudeCli = cmdLower === 'claude' || cmdLower.endsWith('\\claude') || cmdLower.endsWith('/claude') || cmdLower.endsWith('claude.cmd') || cmdLower.endsWith('claude.exe');
+  // Upgrade Claude CLI `-p --output-format text` to `--output-format json` at runtime to extract exact official tokens & cost
+  let expectClaudeJson = false;
+  if (isClaudeCli && (args.includes('-p') || args.includes('--print'))) {
+    const fmtIdx = args.findIndex((a) => a === '--output-format');
+    if (fmtIdx >= 0 && args[fmtIdx + 1] === 'text') {
+      args[fmtIdx + 1] = 'json';
+      expectClaudeJson = true;
+    } else if (fmtIdx >= 0 && args[fmtIdx + 1] === 'json') {
+      expectClaudeJson = true;
+    } else if (fmtIdx === -1 && !args.some((a) => a.startsWith('--output-format='))) {
+      args.push('--output-format', 'json');
+      expectClaudeJson = true;
+    }
+  }
   if (provider.model && provider.modelFlag) {
     args.push(provider.modelFlag, provider.model);
   }
   const effort = provider.thinkingLevel;
   if (effort && effort !== 'default') {
-    const cmdLower = provider.command.toLowerCase();
     if (cmdLower.includes('claude')) {
       const validClaude = new Set(['low', 'medium', 'high', 'xhigh', 'max']);
       if (validClaude.has(effort)) {
@@ -351,7 +367,9 @@ export function runProviderCli(
     child.stdout.on('data', (chunk: Buffer) => {
       const text = chunk.toString('utf8');
       stdout += text;
-      options.onLog?.(text);
+      if (!expectClaudeJson) {
+        options.onLog?.(text);
+      }
     });
 
     child.stderr.on('data', (chunk: Buffer) => {
@@ -379,10 +397,53 @@ export function runProviderCli(
       options.signal?.removeEventListener('abort', onAbort);
 
       if (code === 0) {
+        let finalOutput = stdout.trim() || stderr.trim() || '（CLI 执行完成，无标准输出）';
+        let parsedUsage: TokenUsage | undefined;
+        if (expectClaudeJson && stdout.trim()) {
+          try {
+            const parsed = JSON.parse(stdout.trim()) as {
+              result?: string;
+              total_cost_usd?: number;
+              usage?: {
+                input_tokens?: number;
+                output_tokens?: number;
+                cache_read_input_tokens?: number;
+                cache_creation_input_tokens?: number;
+              };
+            };
+            if (typeof parsed.result === 'string' && parsed.result.trim()) {
+              finalOutput = parsed.result.trim();
+            }
+            if (parsed.usage) {
+              const cacheRead = Math.max(0, Math.round(parsed.usage.cache_read_input_tokens || 0));
+              const cacheCreate = Math.max(0, Math.round(parsed.usage.cache_creation_input_tokens || 0));
+              const inTok = Math.max(0, Math.round(parsed.usage.input_tokens || 0)) + cacheRead + cacheCreate;
+              const outTok = Math.max(0, Math.round(parsed.usage.output_tokens || 0));
+              parsedUsage = {
+                inputTokens: inTok,
+                outputTokens: outTok,
+                totalTokens: inTok + outTok,
+                cacheReadTokens: cacheRead || undefined,
+                costUsd:
+                  typeof parsed.total_cost_usd === 'number' && Number.isFinite(parsed.total_cost_usd)
+                    ? parsed.total_cost_usd
+                    : undefined,
+                estimated: false,
+                source: 'cli',
+              };
+              options.onLog?.(
+                `[Claude CLI] 完成（精确计数：输入 ${inTok} / 输出 ${outTok} / 合计 ${inTok + outTok} tokens${parsedUsage.costUsd ? ` · $${parsedUsage.costUsd.toFixed(4)}` : ''}）\n`,
+              );
+            }
+          } catch {
+            // Fall back to plain stdout if Claude returned non-JSON text
+          }
+        }
         resolve({
-          output: stdout.trim() || stderr.trim() || '（CLI 执行完成，无标准输出）',
+          output: finalOutput,
           exitCode: 0,
           commandPreview,
+          usage: parsedUsage,
         });
       } else {
         const detail = (stderr || stdout).trim().slice(-1500);

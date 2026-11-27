@@ -11,6 +11,7 @@ import type {
   ProviderConfig,
   RunEvent,
   TaskMaterial,
+  TokenUsage,
   WorkflowDefinition,
   WorkflowNodeConfig,
   WorkflowRun,
@@ -30,10 +31,12 @@ import {
   loadRun,
   loadWorkflow,
   loadWorkflowTemplates,
+  recordMemberUsage,
   saveArtifact,
   saveRun,
   saveWorkflow,
 } from './store.js';
+import { normalizeTokenUsage } from './tokenEstimator.js';
 
 export class WorkflowEngine extends EventEmitter {
   private runs = new Map<string, WorkflowRun>();
@@ -401,6 +404,59 @@ export class WorkflowEngine extends EventEmitter {
     };
   }
 
+  private extractMentionedActorIds(
+    text: string,
+    senderId: string,
+    providers: ProviderConfig[],
+  ): string[] {
+    if (!text || !text.includes('@')) return [];
+    const candidates: Array<{ id: string; name: string }> = [];
+    for (const a of agentHub.listAgents()) {
+      if (a.online && a.id !== senderId) {
+        candidates.push({ id: a.id, name: a.name });
+      }
+    }
+    for (const p of providers) {
+      if (p.offline || p.id === senderId) continue;
+      if (!candidates.some((c) => c.id === p.id)) {
+        candidates.push({ id: p.id, name: p.shortName });
+      }
+    }
+    if (candidates.length === 0) return [];
+
+    const matched: string[] = [];
+    let remaining = text.toLowerCase();
+    // 1. Exact longest-name match first (handles spaces like "@AWS Quick", "@Gemini 4 Hydrogen")
+    const sorted = [...candidates].sort((a, b) => b.name.length - a.name.length);
+    for (const c of sorted) {
+      const needle = `@${c.name.toLowerCase()}`;
+      if (remaining.includes(needle)) {
+        matched.push(c.id);
+        remaining = remaining.split(needle).join(' ');
+      }
+    }
+
+    // 2. Fallback short-token @word match (e.g. "@DeepSeek" or "@AWS")
+    const tokens = Array.from(remaining.matchAll(/@([^\s@,，。！？!?:：；;()（）[\]]+)/g)).map((m) =>
+      m[1].toLowerCase(),
+    );
+    for (const token of tokens) {
+      if (token.length < 2) continue;
+      if (token === '全员' || token === 'all') {
+        for (const c of candidates) matched.push(c.id);
+        continue;
+      }
+      for (const c of candidates) {
+        const lowerName = c.name.toLowerCase();
+        if (lowerName.includes(token) || c.id.toLowerCase().includes(token)) {
+          matched.push(c.id);
+        }
+      }
+    }
+
+    return Array.from(new Set(matched)).filter((id) => id !== senderId);
+  }
+
   async sendChatMessage(runId: string, payload: ChatSendPayload): Promise<WorkflowRun> {
     const run = this.getRun(runId);
     if (!run) throw new Error('找不到对应的聊天室');
@@ -524,7 +580,15 @@ export class WorkflowEngine extends EventEmitter {
       status: 'done',
     });
 
-    const recentHistory = this.buildRecentHistory(run, 10);
+    const rawRelayMax = payload.autoRelayMaxRounds;
+    const autoRelayMaxRounds =
+      rawRelayMax === -1
+        ? -1
+        : typeof rawRelayMax === 'number' && Number.isFinite(rawRelayMax) && rawRelayMax > 0
+          ? Math.min(999, Math.floor(rawRelayMax))
+          : 0;
+    const relayEnabled = autoRelayMaxRounds !== 0;
+
     const materialsContext = this.buildMaterialsContext(run);
     run.status = 'running';
     this.emitUpdate(run);
@@ -532,106 +596,164 @@ export class WorkflowEngine extends EventEmitter {
     const aborter = new AbortController();
     this.aborters.set(run.id, aborter);
 
-    // Run all mentioned models in parallel and stream into the chatroom
+    const waitAbortable = (ms: number) =>
+      new Promise<void>((resolve) => {
+        if (aborter.signal.aborted) {
+          resolve();
+          return;
+        }
+        const t = setTimeout(() => {
+          aborter.signal.removeEventListener('abort', onAbort);
+          resolve();
+        }, ms);
+        const onAbort = () => {
+          clearTimeout(t);
+          resolve();
+        };
+        aborter.signal.addEventListener('abort', onAbort, { once: true });
+      });
+
+    // Run initial mentioned models in parallel, then optionally auto-relay AI @mentions up to autoRelayMaxRounds (-1 = unlimited)
     void (async () => {
+      let relayRound = 0;
       try {
         const [repoContext, gitSummary] = await Promise.all([
           collectRepoContext(run.repoPath),
           collectGitSummary(run.repoPath),
         ]);
 
-        await Promise.all(
-          uniqueActors.map(async (actor) => {
-            const startMs = Date.now();
-            const useMock =
-              !actor.isConnectedAgent &&
-              (run.executionMode === 'mock' || Boolean(actor.provider?.forceMock));
-            const isApi = isApiProvider(actor.provider);
-            const connHint = actor.isConnectedAgent
-              ? agentHub.getConnectionHint(actor.id)
-              : 'auto';
-            const isListeningAgent = connHint === 'listening';
-            const isReconnectingAgent = connHint === 'reconnecting';
-            const isBridgeAgent = connHint === 'bridge';
-            const isManualAgent =
-              actor.isConnectedAgent &&
-              (connHint === 'manual' || isReconnectingAgent || isBridgeAgent);
-            const msg = this.pushMessage(run, {
-              role: 'assistant',
-              senderId: actor.id,
-              senderName: actor.shortName,
-              avatar: actor.avatar,
-              accentColor: actor.accentColor,
-              stageTitle: actor.isConnectedAgent
-                ? isListeningAgent
-                  ? '实时待命 · 自动响应'
-                  : isReconnectingAgent
-                    ? '待命接单中'
-                    : isBridgeAgent
-                      ? '文件桥接 · 等待回执'
-                      : isManualAgent
-                        ? '等待接单'
-                        : '自动拉起'
-                : useMock
-                  ? '群聊 · 模拟'
-                  : isApi
-                    ? '群聊 · API'
-                    : '群聊 · 订阅 CLI',
-              content: '',
-              logs: [],
-              wakePrompt: isManualAgent
-                ? agentHub.buildWakePrompt(actor.id)
-                : undefined,
-              status: 'streaming',
-            });
+        const buildRelayHint = (currentActorId: string, roundIdx: number): string => {
+          if (!relayEnabled) return '';
+          const onlinePeers = [
+            ...agentHub
+              .listAgents()
+              .filter((a) => a.online && a.id !== currentActorId)
+              .map((a) => `@${a.name}`),
+            ...providers
+              .filter((p) => !p.offline && p.id !== currentActorId)
+              .map((p) => `@${p.shortName}`),
+          ];
+          const uniquePeers = Array.from(new Set(onlinePeers));
+          if (uniquePeers.length === 0) return '';
+          const limitLabel =
+            autoRelayMaxRounds === -1
+              ? `当前为无限互聊模式（第 ${roundIdx + 1} 轮，用户可随时点击停止）`
+              : `当前剩余可接力轮数：${Math.max(0, autoRelayMaxRounds - roundIdx)} 轮`;
+          return `\n\n【群聊互聊接力说明】${limitLabel}。群里其他在线成员：${uniquePeers.join('、')}。如果你想继续向某位成员发言或追问，请在正文中直接 @对方完整名字，系统会自动接力给他；若话题已自然收尾无需继续，则不要 @任何人。`;
+        };
+
+        const dispatchOneActor = async (
+          actor: ReturnType<WorkflowEngine['resolveActor']>,
+          promptBody: string,
+          relayTag?: string,
+          roundIdx = 0,
+        ): Promise<{ actorId: string; actorName: string; content: string; ok: boolean }> => {
+          const startMs = Date.now();
+          const useMock =
+            !actor.isConnectedAgent &&
+            (run.executionMode === 'mock' || Boolean(actor.provider?.forceMock));
+          const isApi = isApiProvider(actor.provider);
+          const connHint = actor.isConnectedAgent
+            ? agentHub.getConnectionHint(actor.id)
+            : 'auto';
+          const isListeningAgent = connHint === 'listening';
+          const isReconnectingAgent = connHint === 'reconnecting';
+          const isBridgeAgent = connHint === 'bridge';
+          const isManualAgent =
+            actor.isConnectedAgent &&
+            (connHint === 'manual' || isReconnectingAgent || isBridgeAgent);
+          const recentHistory = this.buildRecentHistory(run, 14);
+          const relayHint = buildRelayHint(actor.id, roundIdx);
+
+          const baseStageTitle = actor.isConnectedAgent
+            ? isListeningAgent
+              ? '实时待命 · 自动响应'
+              : isReconnectingAgent
+                ? '待命接单中'
+                : isBridgeAgent
+                  ? '文件桥接 · 等待回执'
+                  : isManualAgent
+                    ? '等待接单'
+                    : '自动拉起'
+            : useMock
+              ? '群聊 · 模拟'
+              : isApi
+                ? '群聊 · API'
+                : '群聊 · 订阅 CLI';
+
+          const msg = this.pushMessage(run, {
+            role: 'assistant',
+            senderId: actor.id,
+            senderName: actor.shortName,
+            avatar: actor.avatar,
+            accentColor: actor.accentColor,
+            stageTitle: relayTag ? `${relayTag} · ${baseStageTitle}` : baseStageTitle,
+            content: '',
+            logs: [],
+            wakePrompt: isManualAgent
+              ? agentHub.buildWakePrompt(actor.id)
+              : undefined,
+            status: 'streaming',
+          });
+          this.emitUpdate(run);
+
+          const onLog = (chunk: string) => {
+            const lines = chunk.replace(/\r?\n/g, '\n').split('\n').filter((l) => l.trim());
+            if (lines.length === 0) return;
+            msg.logs.push(...lines);
+            if (msg.logs.length > 200) msg.logs = msg.logs.slice(-200);
+            this.emit(`run:${run.id}`, run);
+          };
+
+          const onClaimed = (via: 'wait' | 'pull' | 'progress' | 'bridge') => {
+            msg.wakePrompt = undefined;
+            const claimedLabel =
+              via === 'bridge' ? '文件桥接 · 已回执' : '已接单 · 生成中';
+            msg.stageTitle = relayTag ? `${relayTag} · ${claimedLabel}` : claimedLabel;
             this.emitUpdate(run);
+          };
 
-            const onLog = (chunk: string) => {
-              const lines = chunk.replace(/\r?\n/g, '\n').split('\n').filter((l) => l.trim());
-              if (lines.length === 0) return;
-              msg.logs.push(...lines);
-              if (msg.logs.length > 200) msg.logs = msg.logs.slice(-200);
-              this.emit(`run:${run.id}`, run);
-            };
+          let capturedUsage: TokenUsage | undefined;
+          let promptTextForUsage = `${recentHistory}\n${promptBody}${materialsContext}${relayHint}`;
 
-            const onClaimed = (via: 'wait' | 'pull' | 'progress' | 'bridge') => {
-              msg.wakePrompt = undefined;
-              msg.stageTitle =
-                via === 'bridge' ? '文件桥接 · 已回执' : '已接单 · 生成中';
-              this.emitUpdate(run);
-            };
-
-            try {
-              if (actor.isConnectedAgent) {
-                msg.commandPreview = `Agent 长轮询派单 → ${actor.shortName} (${actor.id})`;
-                msg.content = await agentHub.dispatchTask(
-                  actor.id,
-                  {
-                    roomId: run.id,
-                    kind: 'chat',
-                    stageTitle: '群聊 @回复',
-                    repoPath: run.repoPath,
-                    prompt: materialsContext
-                      ? `${contentWithAttachments}${materialsContext}`
-                      : contentWithAttachments,
-                    recentHistory,
-                  },
-                  { signal: aborter.signal, onLog, onClaimed },
-                );
-              } else if (useMock) {
-                msg.commandPreview = isApi
-                  ? `[模拟演练] API ${actor.provider!.model || actor.shortName}`
-                  : `[模拟演练] ${actor.provider!.command} ${actor.provider!.args.join(' ')}`;
-                msg.content = await runMockChatReply({
-                  providerName: actor.shortName,
-                  userMessage: contentWithAttachments,
-                  recentHistory,
+          try {
+            if (actor.isConnectedAgent) {
+              msg.commandPreview = `Agent 长轮询派单 → ${actor.shortName} (${actor.id})`;
+              const fullAgentPrompt = `${promptBody}${materialsContext}${relayHint}`;
+              promptTextForUsage = `${recentHistory}\n${fullAgentPrompt}`;
+              msg.content = await agentHub.dispatchTask(
+                actor.id,
+                {
+                  roomId: run.id,
+                  kind: 'chat',
+                  stageTitle: relayTag || '群聊 @回复',
                   repoPath: run.repoPath,
-                  onLog,
+                  prompt: fullAgentPrompt,
+                  recentHistory,
+                },
+                {
                   signal: aborter.signal,
-                });
-              } else {
-                const prompt = `你正在一个多模型本地协作公共聊天室中，当前你的身份是「${actor.shortName}」。你可以看到用户和群里其他模型刚才的发言，请直接、简洁、有针对性地回复用户（支持 Markdown）。
+                  onLog,
+                  onClaimed,
+                  onUsage: (u) => {
+                    capturedUsage = u;
+                  },
+                },
+              );
+            } else if (useMock) {
+              msg.commandPreview = isApi
+                ? `[模拟演练] API ${actor.provider!.model || actor.shortName}`
+                : `[模拟演练] ${actor.provider!.command} ${actor.provider!.args.join(' ')}`;
+              msg.content = await runMockChatReply({
+                providerName: actor.shortName,
+                userMessage: promptBody,
+                recentHistory,
+                repoPath: run.repoPath,
+                onLog,
+                signal: aborter.signal,
+              });
+            } else {
+              const prompt = `你正在一个多模型本地协作公共聊天室中，当前你的身份是「${actor.shortName}」。你可以看到用户和群里其他模型刚才的发言，请直接、简洁、有针对性地回复（支持 Markdown）。${relayHint}
 
 【目标本地代码目录】
 ${run.repoPath}
@@ -645,34 +767,133 @@ ${gitSummary}${materialsContext}
 【最近群聊记录】
 ${recentHistory}
 
-【用户刚刚 @你 的消息】
-${contentWithAttachments}`;
-                const res = isApi
-                  ? await runProviderApi(actor.provider!, prompt, {
-                      signal: aborter.signal,
-                      onLog,
-                    })
-                  : await runProviderCli(actor.provider!, prompt, {
-                      cwd: run.repoPath,
-                      signal: aborter.signal,
-                      onLog,
-                    });
-                msg.commandPreview = res.commandPreview;
-                msg.content = res.output;
-              }
-              msg.wakePrompt = undefined;
-              msg.status = 'done';
-              msg.durationMs = Date.now() - startMs;
-              this.emitUpdate(run);
-            } catch (err) {
-              msg.wakePrompt = undefined;
-              msg.status = 'error';
-              msg.durationMs = Date.now() - startMs;
-              msg.content = `回复失败：${err instanceof Error ? err.message : String(err)}`;
-              this.emitUpdate(run);
+【当前需要你回复的消息】
+${promptBody}`;
+              promptTextForUsage = prompt;
+              const res = isApi
+                ? await runProviderApi(actor.provider!, prompt, {
+                    signal: aborter.signal,
+                    onLog,
+                  })
+                : await runProviderCli(actor.provider!, prompt, {
+                    cwd: run.repoPath,
+                    signal: aborter.signal,
+                    onLog,
+                  });
+              msg.commandPreview = res.commandPreview;
+              msg.content = res.output;
+              if (res.usage) capturedUsage = res.usage;
             }
-          }),
+            msg.wakePrompt = undefined;
+            if (relayTag) msg.stageTitle = relayTag;
+            const finalUsage =
+              capturedUsage ||
+              normalizeTokenUsage(
+                undefined,
+                { inputText: promptTextForUsage, outputText: msg.content },
+                'estimated',
+              );
+            msg.usage = finalUsage;
+            if (!useMock) {
+              recordMemberUsage(actor.id, finalUsage);
+            }
+            msg.status = 'done';
+            msg.durationMs = Date.now() - startMs;
+            this.emitUpdate(run);
+            return { actorId: actor.id, actorName: actor.shortName, content: msg.content, ok: true };
+          } catch (err) {
+            msg.wakePrompt = undefined;
+            msg.status = 'error';
+            msg.durationMs = Date.now() - startMs;
+            msg.content = `回复失败：${err instanceof Error ? err.message : String(err)}`;
+            this.emitUpdate(run);
+            return { actorId: actor.id, actorName: actor.shortName, content: '', ok: false };
+          }
+        };
+
+        // Round 0: User's initial @mentioned actors
+        let lastWaveReplies = await Promise.all(
+          uniqueActors.map((actor) => dispatchOneActor(actor, contentWithAttachments, undefined, 0)),
         );
+
+        // Auto-relay loop: follow AI-to-AI @mentions up to autoRelayMaxRounds (-1 = unlimited)
+        while (relayEnabled && !aborter.signal.aborted) {
+          const nextTargetsMap = new Map<
+            string,
+            { actor: ReturnType<WorkflowEngine['resolveActor']>; triggers: Array<{ from: string; text: string }> }
+          >();
+
+          for (const reply of lastWaveReplies) {
+            if (!reply.ok || !reply.content.trim()) continue;
+            const mentionedIds = this.extractMentionedActorIds(
+              reply.content,
+              reply.actorId,
+              providers,
+            );
+            for (const targetId of mentionedIds) {
+              if (!nextTargetsMap.has(targetId)) {
+                nextTargetsMap.set(targetId, {
+                  actor: this.resolveActor(providers, targetId),
+                  triggers: [],
+                });
+              }
+              nextTargetsMap.get(targetId)!.triggers.push({
+                from: reply.actorName,
+                text: reply.content,
+              });
+            }
+          }
+
+          if (nextTargetsMap.size === 0) {
+            break;
+          }
+
+          if (autoRelayMaxRounds !== -1 && relayRound >= autoRelayMaxRounds) {
+            this.pushMessage(run, {
+              role: 'system',
+              senderId: 'system',
+              senderName: '群助手',
+              accentColor: '#0284c7',
+              content: `已达到设定的互聊接力上限（**${autoRelayMaxRounds} 轮**），已自动暂停。可在输入框右下角调大轮数或设为 **∞ 无限** 后继续。`,
+              logs: [],
+              status: 'done',
+            });
+            this.emitUpdate(run);
+            break;
+          }
+
+          relayRound += 1;
+          await waitAbortable(800);
+          if (aborter.signal.aborted) break;
+
+          const roundLabel =
+            autoRelayMaxRounds === -1
+              ? `无限互聊 · 第 ${relayRound} 轮`
+              : `互聊接力 · 第 ${relayRound}/${autoRelayMaxRounds} 轮`;
+
+          const waveEntries = Array.from(nextTargetsMap.values());
+          lastWaveReplies = await Promise.all(
+            waveEntries.map(({ actor, triggers }) => {
+              const relayPrompt = triggers
+                .map((t) => `【群成员 ${t.from} 刚刚 @你 说】\n${t.text}`)
+                .join('\n\n---\n\n');
+              return dispatchOneActor(actor, relayPrompt, roundLabel, relayRound);
+            }),
+          );
+        }
+
+        if (aborter.signal.aborted && relayRound > 0) {
+          this.pushMessage(run, {
+            role: 'system',
+            senderId: 'system',
+            senderName: '群助手',
+            accentColor: '#f59e0b',
+            content: `已手动停止互聊接力（共完成 **${relayRound} 轮**）。`,
+            logs: [],
+            status: 'done',
+          });
+          this.emitUpdate(run);
+        }
       } finally {
         if (this.aborters.get(run.id) === aborter) {
           this.aborters.delete(run.id);
@@ -1149,6 +1370,17 @@ ${contentWithAttachments}`;
       chatMsg.logs = [...state.logs];
       chatMsg.commandPreview = state.commandPreview;
       chatMsg.durationMs = state.durationMs;
+      if (actor && isModelNode && state.output) {
+        const nodeUsage = normalizeTokenUsage(
+          undefined,
+          { inputText: `${run.requirement || ''}\n${node.promptTemplate || ''}`, outputText: state.output },
+          'estimated',
+        );
+        chatMsg.usage = nodeUsage;
+        if (!useMock) {
+          recordMemberUsage(actor.id, nodeUsage);
+        }
+      }
       saveArtifact(run.id, `${node.id}.md`, state.output);
 
       this.emitUpdate(run, {
