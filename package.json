@@ -1,0 +1,76 @@
+{
+  "name": "agent-workflow",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Local multi-model subscription CLI visual workflow orchestrator",
+  "author": "Local User",
+  "main": "dist-server/electron/main.js",
+  "bin": {
+    "chatroom": "./bin/chatroom.cjs"
+  },
+  "scripts": {
+    "dev": "concurrently -n server,web -c cyan,magenta \"npm run dev:server\" \"npm run dev:web\"",
+    "dev:server": "tsx watch server/index.ts",
+    "dev:web": "vite",
+    "build": "tsc -p tsconfig.server.json && vite build",
+    "start": "node dist-server/server/index.js",
+    "typecheck": "tsc --noEmit && tsc -p tsconfig.server.json --noEmit",
+    "desktop:dev": "npm run build && electron .",
+    "desktop:build": "npm run build && electron-builder --win portable",
+    "desktop:dir": "npm run build && electron-builder --win --dir"
+  },
+  "build": {
+    "appId": "com.local.agent-workflow",
+    "productName": "Multi-Agent-Workflow",
+    "directories": {
+      "output": "release",
+      "buildResources": "build"
+    },
+    "files": [
+      "dist/**/*",
+      "dist-server/**/*",
+      "cli/SKILL.md",
+      "build/icon.png",
+      "package.json"
+    ],
+    "asar": true,
+    "compression": "normal",
+    "win": {
+      "icon": "build/icon.ico",
+      "signAndEditExecutable": false,
+      "target": [
+        {
+          "target": "portable",
+          "arch": [
+            "x64"
+          ]
+        }
+      ]
+    },
+    "portable": {
+      "artifactName": "Multi-Agent-Workflow-Portable.exe"
+    }
+  },
+  "dependencies": {
+    "@xyflow/react": "^12.6.0",
+    "cors": "^2.8.5",
+    "express": "^5.1.0",
+    "lucide-react": "^0.511.0",
+    "react": "^19.1.0",
+    "react-dom": "^19.1.0"
+  },
+  "devDependencies": {
+    "@types/cors": "^2.8.17",
+    "@types/express": "^5.0.1",
+    "@types/node": "^22.15.3",
+    "@types/react": "^19.1.2",
+    "@types/react-dom": "^19.1.2",
+    "@vitejs/plugin-react": "^4.4.1",
+    "concurrently": "^9.1.2",
+    "electron": "^45.5.0",
+    "electron-builder": "^26.18.0",
+    "tsx": "^4.19.4",
+    "typescript": "^5.8.3",
+    "vite": "^6.3.5"
+  }
+}

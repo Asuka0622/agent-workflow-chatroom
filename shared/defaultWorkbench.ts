@@ -1,0 +1,112 @@
+import type { WorkbenchConfig } from './types.js';
+
+const NOW = new Date().toISOString();
+
+export const DEFAULT_WORKBENCH: WorkbenchConfig = {
+  skills: [
+    {
+      id: 'skill_concise_zh',
+      name: '简洁精准中文输出',
+      trigger: '',
+      description: '自动约束所有模型直接给结论、代码与可执行步骤，减少客套废话',
+      prompt: '请直接用简洁清晰的中文回复，优先给出结论、关键代码或可执行步骤，避免冗长寒暄。',
+      autoInject: true,
+      enabled: true,
+      category: '全局规则',
+      updatedAt: NOW,
+    },
+    {
+      id: 'skill_code_review',
+      name: '深度代码审查',
+      trigger: '/review',
+      description: '按安全性、边界条件、性能与可维护性四维度审查并给出具体修复代码',
+      prompt: '请对当前改动做深度代码审查，按「P0 阻塞缺陷 / P1 边界与安全风险 / P2 性能与可维护性」分级列出问题，并给出可直接落地的修复代码。',
+      autoInject: false,
+      enabled: true,
+      category: '审查',
+      updatedAt: NOW,
+    },
+    {
+      id: 'skill_arch_compare',
+      name: '双方案架构对比',
+      trigger: '/compare',
+      description: '以表格对比多种架构方案的复杂度、风险与演进成本，并给出推荐决策',
+      prompt: '请针对以下需求给出 2 套可行技术方案，用 Markdown 表格从「架构简洁度、性能、风险、改造成本」四个维度对比，并明确推荐其中一套。',
+      autoInject: false,
+      enabled: true,
+      category: '方案',
+      updatedAt: NOW,
+    },
+  ],
+  plugins: [
+    {
+      id: 'plugin_git_status',
+      name: 'Git 仓库状态检查',
+      kind: 'cli_tool',
+      description: '快速检测当前工作目录 Git 分支与未提交变更',
+      enabled: true,
+      command: 'git',
+      args: ['status', '-sb'],
+      updatedAt: NOW,
+    },
+    {
+      id: 'plugin_mcp_fs',
+      name: 'Filesystem MCP',
+      kind: 'mcp_stdio',
+      description: '标准本地文件系统 MCP Server（按需启用）',
+      enabled: false,
+      command: 'npx',
+      args: ['-y', '@modelcontextprotocol/server-filesystem', '.'],
+      updatedAt: NOW,
+    },
+    {
+      id: 'plugin_local_webhook',
+      name: '本地 Webhook 通知',
+      kind: 'webhook',
+      description: '向本机其他服务发送事件通知或触发外部脚本',
+      enabled: false,
+      url: 'http://127.0.0.1:8080/hook',
+      updatedAt: NOW,
+    },
+  ],
+  knowledge: [
+    {
+      id: 'kb_team_conventions',
+      title: '项目协作约定',
+      content: '1. 优先复用现有组件与样式体系，避免引入冗余依赖。\n2. 所有改动需通过 typecheck 并在本地验证后再交付。',
+      tags: ['规范', '全局'],
+      pinned: true,
+      source: 'manual',
+      updatedAt: NOW,
+    },
+  ],
+  templates: [
+    {
+      id: 'tpl_daily_audit',
+      name: '项目健康体检',
+      description: '让在线模型一起检查最近改动中的潜在隐患与优化点',
+      mode: 'chat',
+      prompt: '请结合当前本地目录与 Git 状态，快速做一次代码健康体检：指出最值得优先处理的 3 个风险或优化点。',
+      updatedAt: NOW,
+    },
+    {
+      id: 'tpl_full_delivery',
+      name: '端到端需求研发流',
+      description: '启动完整多模型板块编排（方案对比 → 人工拍板 → 研发 → 审查）',
+      mode: 'workflow',
+      prompt: '请根据以下需求完成方案设计、前后端开发与代码审查：',
+      updatedAt: NOW,
+    },
+  ],
+  schedules: [
+    {
+      id: 'sched_hourly_check',
+      name: '定时仓库巡检',
+      enabled: false,
+      intervalMinutes: 60,
+      mode: 'chat',
+      prompt: '请巡检当前本地代码仓库状态，总结最近改动并提示是否有未提交风险或需要跟进的事项。',
+      updatedAt: NOW,
+    },
+  ],
+};

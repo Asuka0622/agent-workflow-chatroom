@@ -1,0 +1,20 @@
+# Dependencies
+node_modules/
+
+# Build & desktop packaging outputs
+dist/
+dist-server/
+release/
+
+# Local runtime data, chat history, uploaded files & credentials
+data/
+.env
+.env.*
+!.env.example
+
+# Logs & OS artifacts
+*.log
+npm-debug.log*
+.DS_Store
+Thumbs.db
+*.tmp
