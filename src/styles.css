@@ -6349,11 +6349,6 @@ body,
   animation: none;
 }
 
-@keyframes efMarkPulse {
-  0%, 100% { box-shadow: 0 0 6px rgba(37, 99, 235, 0.22); }
-  50% { box-shadow: 0 0 14px rgba(250, 204, 21, 0.45); }
-}
-
 .ef-mini-wave {
   display: inline-flex;
   align-items: flex-end;
@@ -7586,6 +7581,40 @@ button.jr-contents-head span {
   font-weight: 700;
   font-size: 14px;
   letter-spacing: 0.08em;
+}
+
+/* Brand strip stays on one line at any sidebar width; text truncates instead of wrapping */
+.ef-brand-strip {
+  container-type: inline-size;
+}
+
+.ef-brand-left {
+  flex: 1;
+}
+
+/* Let the wordmark use all the room left of the badges (headroom against font-metric rounding) */
+.ef-brand-left .ef-brand-text {
+  flex: 1;
+}
+
+.ef-brand-title,
+.ef-brand-sub {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+@container (max-width: 195px) {
+  .ef-brand-title {
+    font-size: 12.5px;
+    letter-spacing: 0.04em;
+  }
+  .ef-brand-sub {
+    letter-spacing: 0.02em;
+  }
+  .ef-mini-wave {
+    display: none;
+  }
 }
 
 @media (prefers-reduced-motion: reduce) {
