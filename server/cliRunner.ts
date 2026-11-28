@@ -1,11 +1,47 @@
 import { execFile, spawn } from 'node:child_process';
 import fs from 'node:fs';
+import os from 'node:os';
 import path from 'node:path';
 import { promisify } from 'node:util';
 import type { AgentTrigger, ProviderConfig, ProviderHealth, TokenUsage } from '../shared/types.js';
 
 const execFileAsync = promisify(execFile);
 const IS_WIN = process.platform === 'win32';
+
+function getExtraCliBinDirs(): string[] {
+  const home = os.homedir();
+  if (IS_WIN) {
+    const localAppData = process.env.LOCALAPPDATA || path.join(home, 'AppData', 'Local');
+    const appData = process.env.APPDATA || path.join(home, 'AppData', 'Roaming');
+    return [
+      path.join(localAppData, 'agy', 'bin'),
+      path.join(home, '.local', 'bin'),
+      path.join(appData, 'npm'),
+      path.join(localAppData, 'pnpm'),
+      path.join(home, 'scoop', 'shims'),
+    ].filter((d) => fs.existsSync(d));
+  }
+  return [
+    path.join(home, '.local', 'bin'),
+    '/usr/local/bin',
+    '/opt/homebrew/bin',
+  ].filter((d) => fs.existsSync(d));
+}
+
+function buildAugmentedEnv(): NodeJS.ProcessEnv {
+  const sep = IS_WIN ? ';' : ':';
+  const curPath = process.env.PATH || process.env.Path || '';
+  const curParts = new Set(curPath.split(sep).map((s) => s.toLowerCase()));
+  const extras = getExtraCliBinDirs().filter((d) => !curParts.has(d.toLowerCase()));
+  const nextPath = extras.length > 0 ? `${extras.join(sep)}${sep}${curPath}` : curPath;
+  return {
+    ...process.env,
+    PATH: nextPath,
+    ...(IS_WIN ? { Path: nextPath } : {}),
+    PYTHONUTF8: '1',
+    FORCE_COLOR: '0',
+  };
+}
 
 export interface RunCliOptions {
   cwd: string;
@@ -21,11 +57,27 @@ export interface RunCliResult {
 }
 
 export async function resolveCommandPath(cmd: string): Promise<string | undefined> {
+  const clean = (cmd || '').trim();
+  if (!clean) return undefined;
+  if (path.isAbsolute(clean) && fs.existsSync(clean)) {
+    return clean;
+  }
+  // Check well-known user CLI bin folders first (works immediately after fresh install without restarting app)
+  const exts = IS_WIN ? ['.exe', '.cmd', '.bat', ''] : [''];
+  for (const dir of getExtraCliBinDirs()) {
+    for (const ext of exts) {
+      const candidate = path.join(dir, `${clean}${ext}`);
+      if (fs.existsSync(candidate) && fs.statSync(candidate).isFile()) {
+        return candidate;
+      }
+    }
+  }
   try {
     const locator = IS_WIN ? 'where' : 'which';
-    const { stdout } = await execFileAsync(locator, [cmd], {
+    const { stdout } = await execFileAsync(locator, [clean], {
       timeout: 5000,
       windowsHide: true,
+      env: buildAugmentedEnv(),
     });
     const first = stdout
       .split(/\r?\n/)
@@ -80,26 +132,37 @@ export async function autoDetectCliTriggerForModel(
     };
   }
 
-  // 2. Gemini family -> official Gemini CLI
-  if (key.includes('gemini')) {
-    const args = ['-p', '-'];
-    const resolved = await resolveCommandPath('gemini');
-    if (resolved) {
+  // 2. Gemini / Antigravity family -> official Antigravity CLI (agy) first, fallback to legacy gemini CLI
+  if (key.includes('gemini') || key.includes('antigravity') || key.includes('agy')) {
+    const agyArgs = ['-p', '--output-format', 'text'];
+    const agyResolved = await resolveCommandPath('agy');
+    if (agyResolved) {
       return {
         found: true,
-        trigger: { type: 'cli', command: 'gemini', args, inputMode: 'stdin' },
-        resolvedPath: resolved,
-        message: `已自动检测到本机 Gemini CLI（${resolved}），已设为自动拉起`,
+        trigger: { type: 'cli', command: 'agy', args: agyArgs, inputMode: 'stdin' },
+        resolvedPath: agyResolved,
+        message: `已自动检测到本机 Antigravity CLI（${agyResolved}），已设为自动拉起`,
+      };
+    }
+    const legacyResolved = await resolveCommandPath('gemini');
+    if (legacyResolved) {
+      return {
+        found: true,
+        trigger: { type: 'cli', command: 'gemini', args: ['-p', '-'], inputMode: 'stdin' },
+        resolvedPath: legacyResolved,
+        message: `已检测到旧版 gemini CLI（${legacyResolved}）；若个人账号登录受限建议改装 Antigravity CLI (agy)`,
       };
     }
     return {
       found: false,
-      message: '未检测到本机 gemini CLI，暂用按需唤醒',
+      message: '未检测到本机 agy (Antigravity CLI)，暂用按需唤醒',
       suggestion: {
-        command: 'gemini',
-        args,
-        installCmd: 'npm install -g @google/gemini-cli',
-        loginCmd: 'gemini',
+        command: 'agy',
+        args: agyArgs,
+        installCmd: IS_WIN
+          ? 'irm https://antigravity.google/cli/install.ps1 | iex'
+          : 'curl -fsSL https://antigravity.google/cli/install.sh | bash',
+        loginCmd: 'agy',
       },
     };
   }
@@ -194,6 +257,7 @@ async function probeVersion(cmd: string): Promise<string | undefined> {
     const child = spawn(cmd, ['--version'], {
       shell: IS_WIN,
       windowsHide: true,
+      env: buildAugmentedEnv(),
       stdio: ['ignore', 'pipe', 'pipe'],
     });
     let out = '';
@@ -300,6 +364,12 @@ export function runProviderCli(
       if (validClaude.has(effort)) {
         args.push('--effort', effort);
       }
+    } else if (cmdLower === 'agy' || cmdLower.endsWith('\\agy') || cmdLower.endsWith('/agy') || cmdLower.endsWith('agy.exe')) {
+      const validAgy = new Set(['low', 'medium', 'high', 'max']);
+      const mapped = effort === 'xhigh' ? 'max' : effort === 'minimal' ? 'low' : effort;
+      if (validAgy.has(mapped)) {
+        args.push('--effort', mapped);
+      }
     } else if (cmdLower.includes('codex')) {
       const validCodex = new Set(['minimal', 'low', 'medium', 'high', 'xhigh']);
       const mapped = effort === 'max' ? 'xhigh' : effort;
@@ -324,11 +394,7 @@ export function runProviderCli(
       cwd,
       shell: IS_WIN,
       windowsHide: true,
-      env: {
-        ...process.env,
-        PYTHONUTF8: '1',
-        FORCE_COLOR: '0',
-      },
+      env: buildAugmentedEnv(),
       stdio: ['pipe', 'pipe', 'pipe'],
     });
 
@@ -385,7 +451,7 @@ export function runProviderCli(
       options.signal?.removeEventListener('abort', onAbort);
       reject(
         new Error(
-          `无法启动 CLI「${provider.command}」：${err.message}。请确认已安装并在终端完成订阅登录，或切换到模拟演练模式。`,
+          `无法启动 CLI「${provider.command}」：${err.message}。请确认已安装并在终端完成订阅登录，或在模型池改用 API Key / 邀请外部 Agent 接入。`,
         ),
       );
     });

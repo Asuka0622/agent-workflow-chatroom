@@ -39,6 +39,7 @@ export type ThinkingLevel =
 export type ProviderConnectionType =
   | 'cli'
   | 'openai_api'
+  | 'azure_openai'
   | 'anthropic_api'
   | 'gemini_api';
 
@@ -126,10 +127,13 @@ export interface WorkflowDefinition {
   edges: WorkflowEdgeConfig[];
 }
 
+export type WorkflowTemplateCategory = 'dev' | 'review' | 'brainstorm' | 'writing' | 'custom';
+
 export interface WorkflowPresetTemplate {
   id: string;
   name: string;
   description: string;
+  category?: WorkflowTemplateCategory;
   builtin?: boolean;
   workflow: WorkflowDefinition;
   updatedAt: string;
@@ -244,6 +248,8 @@ export interface ChatMessage {
   logs: string[];
   commandPreview?: string;
   wakePrompt?: string;
+  bridgeTaskId?: string;
+  bridgeDirectPrompt?: string;
   usage?: TokenUsage;
   status: 'streaming' | 'done' | 'error';
   durationMs?: number;
@@ -358,6 +364,8 @@ export interface WorkbenchSkill {
   prompt: string;
   autoInject: boolean;
   enabled: boolean;
+  /** Optional member IDs (provider IDs or connected agent IDs). Empty/omitted = all members. */
+  targetMemberIds?: string[];
   category?: string;
   updatedAt: string;
 }

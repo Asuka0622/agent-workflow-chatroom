@@ -26,6 +26,7 @@ import {
   X,
 } from 'lucide-react';
 import { api } from '../api';
+import { useI18n } from '../i18n';
 import { MarkdownView } from './MarkdownView';
 
 interface TreeEntry {
@@ -102,6 +103,7 @@ export const WorkspacePane: React.FC<WorkspacePaneProps> = ({
   onInsertPromptToChat,
   onToast,
 }) => {
+  const { tr } = useI18n();
   const [tab, setTab] = useState<'files' | 'git'>('files');
   const [showHidden, setShowHidden] = useState(false);
   const [editingPath, setEditingPath] = useState(false);
@@ -411,7 +413,7 @@ export const WorkspacePane: React.FC<WorkspacePaneProps> = ({
             <button
               type="button"
               className="ws-root-chip"
-              title={`当前工作区：${repoPath}（点击切换目录）`}
+              title={tr(`当前工作区：${repoPath}（点击切换目录）`, `Workspace: ${repoPath} (click to switch)`)}
               onClick={() => {
                 if (window.desktopApi?.isDesktop && onPickFolderDesktop) {
                   void onPickFolderDesktop();
@@ -421,14 +423,14 @@ export const WorkspacePane: React.FC<WorkspacePaneProps> = ({
               }}
             >
               <span className="ws-root-name">{rootName}</span>
-              <span className="ws-root-switch">切换</span>
+              <span className="ws-root-switch">{tr('切换', 'Switch')}</span>
             </button>
           )}
 
           <button
             type="button"
             className="studio-icon-btn"
-            title="刷新工作区与 Git 状态"
+            title={tr('刷新工作区与 Git 状态', 'Refresh workspace & Git status')}
             onClick={handleRefreshAll}
           >
             <RefreshCw size={13} />
@@ -437,7 +439,7 @@ export const WorkspacePane: React.FC<WorkspacePaneProps> = ({
           <button
             type="button"
             className="studio-icon-btn"
-            title="在系统资源管理器打开当前目录"
+            title={tr('在系统资源管理器打开当前目录', 'Open in File Explorer')}
             onClick={() => void api.openInExplorer(selectedFile?.absPath || repoPath)}
           >
             <Folder size={13} />
@@ -452,7 +454,7 @@ export const WorkspacePane: React.FC<WorkspacePaneProps> = ({
               onClick={() => setTab('files')}
             >
               <FileCode2 size={12} />
-              <span>文件</span>
+              <span>{tr('文件', 'Files')}</span>
             </button>
             <button
               type="button"
@@ -464,7 +466,7 @@ export const WorkspacePane: React.FC<WorkspacePaneProps> = ({
             >
               <GitBranch size={12} />
               <span>
-                变更{gitInfo.changes.length > 0 ? ` (${gitInfo.changes.length})` : ''}
+                {tr('变更', 'Changes')}{gitInfo.changes.length > 0 ? ` (${gitInfo.changes.length})` : ''}
               </span>
             </button>
           </div>
@@ -472,7 +474,7 @@ export const WorkspacePane: React.FC<WorkspacePaneProps> = ({
           <button
             type="button"
             className="studio-icon-btn"
-            title={isFullscreen ? '恢复左右分屏' : '全屏展开工作区'}
+            title={isFullscreen ? tr('恢复左右分屏', 'Exit fullscreen') : tr('全屏展开工作区', 'Expand fullscreen')}
             onClick={onToggleFullscreen}
           >
             {isFullscreen ? <Minimize2 size={14} /> : <Maximize2 size={14} />}
@@ -481,7 +483,7 @@ export const WorkspacePane: React.FC<WorkspacePaneProps> = ({
           <button
             type="button"
             className="studio-icon-btn"
-            title="关闭工作区"
+            title={tr('关闭工作区', 'Close workspace')}
             onClick={onClose}
           >
             <X size={15} />
@@ -499,7 +501,7 @@ export const WorkspacePane: React.FC<WorkspacePaneProps> = ({
                 <Search size={12} />
                 <input
                   className="ws-search-input"
-                  placeholder="搜索文件..."
+                  placeholder={tr('搜索文件...', 'Search files...')}
                   value={searchQuery}
                   onChange={(e) => setSearchQuery(e.target.value)}
                 />
@@ -627,10 +629,13 @@ export const WorkspacePane: React.FC<WorkspacePaneProps> = ({
               <div className="ws-viewer-empty">
                 <FolderOpen size={28} style={{ opacity: 0.4 }} />
                 <div style={{ fontWeight: 650, fontSize: 13.5, color: 'var(--text)' }}>
-                  工作区：{rootName}
+                  {tr('工作区：', 'Workspace: ')}{rootName}
                 </div>
                 <p>
-                  点击左侧文件树可即时预览或在线编辑代码/文档；悬停文件点回形针，即可一键附带到左侧多模型对话中。
+                  {tr(
+                    '点击左侧文件树可即时预览或在线编辑代码/文档；悬停文件点回形针，即可一键附带到左侧多模型对话中。',
+                    'Click any file on the left to preview or edit live; click the paperclip icon to attach it to the chat.',
+                  )}
                 </p>
               </div>
             ) : (
@@ -646,11 +651,11 @@ export const WorkspacePane: React.FC<WorkspacePaneProps> = ({
                     <button
                       type="button"
                       className="cc-tool-btn"
-                      title="将该文件附带到左侧聊天框供模型读取"
+                      title={tr('将该文件附带到左侧聊天框供模型读取', 'Attach this file to chat')}
                       onClick={() => void onAttachFileToChat(selectedFile.absPath)}
                     >
                       <Paperclip size={11} />
-                      <span>引用到对话</span>
+                      <span>{tr('引用到对话', 'Cite to Chat')}</span>
                     </button>
 
                     {!selectedFile.isBinary && (
@@ -661,7 +666,7 @@ export const WorkspacePane: React.FC<WorkspacePaneProps> = ({
                             className="cc-tool-btn"
                             onClick={() => setMdRendered((v) => !v)}
                           >
-                            {mdRendered ? '源码' : '渲染'}
+                            {mdRendered ? tr('源码', 'Source') : tr('渲染', 'Preview')}
                           </button>
                         )}
                         {isEditingFile ? (
@@ -674,7 +679,7 @@ export const WorkspacePane: React.FC<WorkspacePaneProps> = ({
                                 setEditBuffer(selectedFile.content);
                               }}
                             >
-                              取消
+                              {tr('取消', 'Cancel')}
                             </button>
                             <button
                               type="button"
@@ -684,14 +689,14 @@ export const WorkspacePane: React.FC<WorkspacePaneProps> = ({
                               onClick={() => void handleSaveFile()}
                             >
                               <Save size={11} />
-                              {savingFile ? '保存中' : '保存'}
+                              {savingFile ? tr('保存中', 'Saving') : tr('保存', 'Save')}
                             </button>
                           </>
                         ) : (
                           <button
                             type="button"
                             className="mini-icon-btn"
-                            title="在线编辑文件"
+                            title={tr('在线编辑文件', 'Edit file')}
                             onClick={() => {
                               setEditBuffer(selectedFile.content);
                               setIsEditingFile(true);
@@ -832,9 +837,14 @@ export const WorkspacePane: React.FC<WorkspacePaneProps> = ({
               <div className="ws-viewer-empty">
                 <GitBranch size={26} style={{ opacity: 0.4 }} />
                 <div style={{ fontWeight: 650, fontSize: 13.5, color: 'var(--text)' }}>
-                  Git 变更审查
+                  {tr('Git 变更审查', 'Git Diff Review')}
                 </div>
-                <p>点击左侧任一改动文件即可查看着色 Diff，并一键发给群里模型做交叉代码审查。</p>
+                <p>
+                  {tr(
+                    '点击左侧任一改动文件即可查看着色 Diff，并一键发给群里模型做交叉代码审查。',
+                    'Click any changed file on the left to inspect its diff and send it to the chatroom for review.',
+                  )}
+                </p>
               </div>
             ) : (
               <>
@@ -852,7 +862,7 @@ export const WorkspacePane: React.FC<WorkspacePaneProps> = ({
                       onClick={handleSendDiffToChat}
                     >
                       <Send size={11} />
-                      <span>发给群聊审查</span>
+                      <span>{tr('发给群聊审查', 'Send for Review')}</span>
                     </button>
                   </div>
                 </div>

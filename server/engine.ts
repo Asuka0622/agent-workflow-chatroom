@@ -27,6 +27,7 @@ import { agentHub } from './agentHub.js';
 import { runMockChatReply, runMockNode } from './mockRunner.js';
 import { buildGlobalWorkbenchContext } from './workbench.js';
 import {
+  listRuns,
   loadProviders,
   loadRun,
   loadWorkflow,
@@ -59,8 +60,52 @@ export function deriveRoomTitle(content: string): string {
 
 export class WorkflowEngine extends EventEmitter {
   private runs = new Map<string, WorkflowRun>();
-  private aborters = new Map<string, AbortController>();
+  private aborters = new Map<string, Set<AbortController>>();
+  private messageAborters = new Map<string, AbortController>();
   private activePromises = new Set<string>();
+
+  private registerAborter(runId: string, aborter: AbortController): void {
+    let set = this.aborters.get(runId);
+    if (!set) {
+      set = new Set();
+      this.aborters.set(runId, set);
+    }
+    set.add(aborter);
+  }
+
+  private unregisterAborter(runId: string, aborter: AbortController): void {
+    const set = this.aborters.get(runId);
+    if (!set) return;
+    set.delete(aborter);
+    if (set.size === 0) this.aborters.delete(runId);
+  }
+
+  private abortAllForRun(runId: string): void {
+    const set = this.aborters.get(runId);
+    if (set) {
+      for (const a of Array.from(set)) {
+        try {
+          a.abort();
+        } catch {
+          // ignore
+        }
+      }
+      this.aborters.delete(runId);
+    }
+  }
+
+  private promoteMessageToActualOrder(run: WorkflowRun, msg: ChatMessage): void {
+    msg.createdAt = new Date().toISOString();
+    const idx = run.messages.indexOf(msg);
+    if (idx >= 0) {
+      run.messages.splice(idx, 1);
+    }
+    let insertAt = run.messages.length;
+    while (insertAt > 0 && run.messages[insertAt - 1].status === 'streaming') {
+      insertAt -= 1;
+    }
+    run.messages.splice(insertAt, 0, msg);
+  }
 
   getRun(runId: string): WorkflowRun | null {
     const cached = this.runs.get(runId);
@@ -79,13 +124,15 @@ export class WorkflowEngine extends EventEmitter {
         if (m.status === 'streaming') {
           m.status = 'error';
           m.wakePrompt = undefined;
+          m.bridgeTaskId = undefined;
+          m.bridgeDirectPrompt = undefined;
           if (!m.content?.trim()) {
             m.content = '（服务重启前未完成，请重新发送）';
           }
           cleaned = true;
         }
       }
-      if (disk.status === 'running' && !this.activePromises.has(runId)) {
+      if (disk.status === 'running' && !this.activePromises.has(runId) && !this.aborters.has(runId)) {
         disk.status = 'idle';
         cleaned = true;
       }
@@ -93,6 +140,11 @@ export class WorkflowEngine extends EventEmitter {
       this.runs.set(runId, disk);
     }
     return disk;
+  }
+
+  listRuns(): WorkflowRun[] {
+    const diskRuns = listRuns();
+    return diskRuns.map((r) => this.getRun(r.id) || r);
   }
 
   addMaterial(
@@ -129,7 +181,7 @@ export class WorkflowEngine extends EventEmitter {
     return run;
   }
 
-  private buildMaterialsContext(run: WorkflowRun): string {
+  private buildMaterialsContext(run: WorkflowRun, memberId?: string): string {
     const items = run.materials || [];
     const roomPart =
       items.length === 0
@@ -139,7 +191,7 @@ export class WorkflowEngine extends EventEmitter {
             .slice(0, 8)
             .map((m) => `### ${m.title}\n${m.content.slice(0, 2000)}`)
             .join('\n\n');
-    const globalPart = buildGlobalWorkbenchContext();
+    const globalPart = buildGlobalWorkbenchContext(memberId);
     return `${globalPart}${roomPart}`;
   }
 
@@ -240,13 +292,23 @@ export class WorkflowEngine extends EventEmitter {
   private appendNodeLog(run: WorkflowRun, nodeId: string, chunk: string): void {
     const state = run.nodes[nodeId];
     if (!state) return;
-    const lines = chunk.replace(/\r\n/g, '\n').split('\n');
-    for (const line of lines) {
-      if (!line.trim()) continue;
-      state.logs.push(line);
-    }
+    const lines = chunk
+      .replace(/\r\n/g, '\n')
+      .split('\n')
+      .filter((line) => Boolean(line.trim()));
+    if (lines.length === 0) return;
+    state.logs.push(...lines);
     if (state.logs.length > 400) {
       state.logs = state.logs.slice(-400);
+    }
+    const streamingMsg = [...run.messages]
+      .reverse()
+      .find((m) => m.stageId === nodeId && m.status === 'streaming');
+    if (streamingMsg) {
+      streamingMsg.logs.push(...lines);
+      if (streamingMsg.logs.length > 200) {
+        streamingMsg.logs = streamingMsg.logs.slice(-200);
+      }
     }
     run.updatedAt = new Date().toISOString();
     this.emit(`run:${run.id}`, run);
@@ -293,7 +355,7 @@ export class WorkflowEngine extends EventEmitter {
       branchName:
         payload.branchName?.trim() ||
         `feat/${id.replace('room_', '')}`,
-      executionMode: payload.executionMode || 'mock',
+      executionMode: payload.executionMode || 'real',
       autoMergeEnabled: Boolean(payload.autoMergeEnabled),
       autoDeployEnabled: Boolean(payload.autoDeployEnabled),
       checkCommand: payload.checkCommand?.trim() || 'npm run typecheck',
@@ -323,7 +385,7 @@ export class WorkflowEngine extends EventEmitter {
       saveArtifact(id, '00-requirement.md', reqText);
       this.emitUpdate(run, {
         type: 'run_started',
-        message: `工作流已启动（${run.executionMode === 'mock' ? '模拟演练' : '真实订阅 CLI'}）`,
+        message: `工作流已启动（${run.executionMode === 'mock' ? '画布演练' : '真实执行'}）`,
       });
       void this.scheduleLoop(run.id);
     } else {
@@ -588,9 +650,9 @@ export class WorkflowEngine extends EventEmitter {
     // Mode 2: Free-form group chat with 1 or more @mentioned models (CLI providers OR live self-joined Agents!)
     const providers = loadProviders();
     const targetIds =
-      payload.targetProviderIds && payload.targetProviderIds.length > 0
+      Array.isArray(payload.targetProviderIds) && payload.targetProviderIds.length > 0
         ? payload.targetProviderIds
-        : [providers[0]?.id || 'claude'];
+        : [];
 
     const actors = targetIds.map((id) => this.resolveActor(providers, id));
     const uniqueActors = actors.filter(
@@ -603,12 +665,18 @@ export class WorkflowEngine extends EventEmitter {
       senderId: 'human',
       senderName: '我',
       accentColor: '#0284c7',
-      stageTitle: mentionPrefix,
+      stageTitle: mentionPrefix || undefined,
       content: effectiveContent,
       attachments: displayAttachments.length > 0 ? displayAttachments : undefined,
       logs: [],
       status: 'done',
     });
+
+    // Never silently fall back to providers[0] (e.g. Claude Opus) if no target was specified
+    if (uniqueActors.length === 0) {
+      this.emitUpdate(run);
+      return run;
+    }
 
     const rawRelayMax = payload.autoRelayMaxRounds;
     const autoRelayMaxRounds =
@@ -619,12 +687,11 @@ export class WorkflowEngine extends EventEmitter {
           : 0;
     const relayEnabled = autoRelayMaxRounds !== 0;
 
-    const materialsContext = this.buildMaterialsContext(run);
     run.status = 'running';
     this.emitUpdate(run);
 
     const aborter = new AbortController();
-    this.aborters.set(run.id, aborter);
+    this.registerAborter(run.id, aborter);
 
     const waitAbortable = (ms: number) =>
       new Promise<void>((resolve) => {
@@ -694,6 +761,7 @@ export class WorkflowEngine extends EventEmitter {
             (connHint === 'manual' || isReconnectingAgent || isBridgeAgent);
           const recentHistory = this.buildRecentHistory(run, 14);
           const relayHint = buildRelayHint(actor.id, roundIdx);
+          const materialsContext = this.buildMaterialsContext(run, actor.id);
 
           const baseStageTitle = actor.isConnectedAgent
             ? isListeningAgent
@@ -737,6 +805,8 @@ export class WorkflowEngine extends EventEmitter {
 
           const onClaimed = (via: 'wait' | 'pull' | 'progress' | 'bridge') => {
             msg.wakePrompt = undefined;
+            msg.bridgeTaskId = undefined;
+            msg.bridgeDirectPrompt = undefined;
             const claimedLabel =
               via === 'bridge' ? '文件桥接 · 已回执' : '已接单 · 生成中';
             msg.stageTitle = relayTag ? `${relayTag} · ${claimedLabel}` : claimedLabel;
@@ -745,6 +815,14 @@ export class WorkflowEngine extends EventEmitter {
 
           let capturedUsage: TokenUsage | undefined;
           let promptTextForUsage = `${recentHistory}\n${promptBody}${materialsContext}${relayHint}`;
+          const msgAborter = new AbortController();
+          this.messageAborters.set(msg.id, msgAborter);
+          const forwardAbort = () => msgAborter.abort();
+          if (aborter.signal.aborted) {
+            msgAborter.abort();
+          } else {
+            aborter.signal.addEventListener('abort', forwardAbort, { once: true });
+          }
 
           try {
             if (actor.isConnectedAgent) {
@@ -762,8 +840,13 @@ export class WorkflowEngine extends EventEmitter {
                   recentHistory,
                 },
                 {
-                  signal: aborter.signal,
+                  signal: msgAborter.signal,
                   onLog,
+                  onDispatched: (meta) => {
+                    msg.bridgeTaskId = meta.taskId;
+                    msg.bridgeDirectPrompt = meta.directPrompt;
+                    this.emitUpdate(run);
+                  },
                   onClaimed,
                   onUsage: (u) => {
                     capturedUsage = u;
@@ -780,7 +863,7 @@ export class WorkflowEngine extends EventEmitter {
                 recentHistory,
                 repoPath: run.repoPath,
                 onLog,
-                signal: aborter.signal,
+                signal: msgAborter.signal,
               });
             } else {
               const prompt = `你正在一个多模型本地协作公共聊天室中，当前你的身份是「${actor.shortName}」。你可以看到用户和群里其他模型刚才的发言，请直接、简洁、有针对性地回复（支持 Markdown）。${relayHint}
@@ -802,12 +885,12 @@ ${promptBody}`;
               promptTextForUsage = prompt;
               const res = isApi
                 ? await runProviderApi(actor.provider!, prompt, {
-                    signal: aborter.signal,
+                    signal: msgAborter.signal,
                     onLog,
                   })
                 : await runProviderCli(actor.provider!, prompt, {
                     cwd: run.repoPath,
-                    signal: aborter.signal,
+                    signal: msgAborter.signal,
                     onLog,
                   });
               msg.commandPreview = res.commandPreview;
@@ -815,7 +898,9 @@ ${promptBody}`;
               if (res.usage) capturedUsage = res.usage;
             }
             msg.wakePrompt = undefined;
-            if (relayTag) msg.stageTitle = relayTag;
+            msg.bridgeTaskId = undefined;
+            msg.bridgeDirectPrompt = undefined;
+            msg.stageTitle = relayTag || undefined;
             const finalUsage =
               capturedUsage ||
               normalizeTokenUsage(
@@ -829,87 +914,99 @@ ${promptBody}`;
             }
             msg.status = 'done';
             msg.durationMs = Date.now() - startMs;
+            this.promoteMessageToActualOrder(run, msg);
             this.emitUpdate(run);
             return { actorId: actor.id, actorName: actor.shortName, content: msg.content, ok: true };
           } catch (err) {
             msg.wakePrompt = undefined;
+            msg.bridgeTaskId = undefined;
+            msg.bridgeDirectPrompt = undefined;
+            msg.stageTitle = relayTag || undefined;
             msg.status = 'error';
             msg.durationMs = Date.now() - startMs;
-            msg.content = `回复失败：${err instanceof Error ? err.message : String(err)}`;
+            msg.content = msgAborter.signal.aborted
+              ? '已取消等待（跳过本条回复）'
+              : `回复失败：${err instanceof Error ? err.message : String(err)}`;
             this.emitUpdate(run);
             return { actorId: actor.id, actorName: actor.shortName, content: '', ok: false };
+          } finally {
+            aborter.signal.removeEventListener('abort', forwardAbort);
+            this.messageAborters.delete(msg.id);
           }
         };
 
-        // Round 0: User's initial @mentioned actors
-        let lastWaveReplies = await Promise.all(
-          uniqueActors.map((actor) => dispatchOneActor(actor, contentWithAttachments, undefined, 0)),
-        );
+        // Non-blocking event-driven dispatch: each member triggers downstream @mention relays
+        // immediately upon finishing, so ONE member stalled on a client confirmation dialog NEVER
+        // blocks other members or freezes the chatroom's auto-relay!
+        const inFlight = new Set<Promise<void>>();
+        let reachedRelayCapNotice = false;
 
-        // Auto-relay loop: follow AI-to-AI @mentions up to autoRelayMaxRounds (-1 = unlimited)
-        while (relayEnabled && !aborter.signal.aborted) {
-          const nextTargetsMap = new Map<
-            string,
-            { actor: ReturnType<WorkflowEngine['resolveActor']>; triggers: Array<{ from: string; text: string }> }
-          >();
-
-          for (const reply of lastWaveReplies) {
-            if (!reply.ok || !reply.content.trim()) continue;
+        const scheduleActor = (
+          actor: ReturnType<WorkflowEngine['resolveActor']>,
+          promptBody: string,
+          relayTag: string | undefined,
+          roundIdx: number,
+        ): void => {
+          const taskPromise = (async () => {
+            const reply = await dispatchOneActor(actor, promptBody, relayTag, roundIdx);
+            if (!relayEnabled || aborter.signal.aborted || !reply.ok || !reply.content.trim()) {
+              return;
+            }
             const mentionedIds = this.extractMentionedActorIds(
               reply.content,
               reply.actorId,
               providers,
             );
-            for (const targetId of mentionedIds) {
-              if (!nextTargetsMap.has(targetId)) {
-                nextTargetsMap.set(targetId, {
-                  actor: this.resolveActor(providers, targetId),
-                  triggers: [],
+            if (mentionedIds.length === 0) return;
+
+            if (autoRelayMaxRounds !== -1 && relayRound >= autoRelayMaxRounds) {
+              if (!reachedRelayCapNotice) {
+                reachedRelayCapNotice = true;
+                this.pushMessage(run, {
+                  role: 'system',
+                  senderId: 'system',
+                  senderName: '群助手',
+                  accentColor: '#0284c7',
+                  content: `已达到设定的互聊接力上限（**${autoRelayMaxRounds} 轮**），已自动暂停。可在输入框右下角调大轮数或设为 **∞ 无限** 后继续。`,
+                  logs: [],
+                  status: 'done',
                 });
+                this.emitUpdate(run);
               }
-              nextTargetsMap.get(targetId)!.triggers.push({
-                from: reply.actorName,
-                text: reply.content,
-              });
+              return;
             }
-          }
 
-          if (nextTargetsMap.size === 0) {
-            break;
-          }
+            relayRound += 1;
+            const myRound = relayRound;
+            await waitAbortable(600);
+            if (aborter.signal.aborted) return;
 
-          if (autoRelayMaxRounds !== -1 && relayRound >= autoRelayMaxRounds) {
-            this.pushMessage(run, {
-              role: 'system',
-              senderId: 'system',
-              senderName: '群助手',
-              accentColor: '#0284c7',
-              content: `已达到设定的互聊接力上限（**${autoRelayMaxRounds} 轮**），已自动暂停。可在输入框右下角调大轮数或设为 **∞ 无限** 后继续。`,
-              logs: [],
-              status: 'done',
-            });
-            this.emitUpdate(run);
-            break;
-          }
+            const roundLabel =
+              autoRelayMaxRounds === -1
+                ? `无限互聊 · 第 ${myRound} 轮`
+                : `互聊接力 · 第 ${myRound}/${autoRelayMaxRounds} 轮`;
 
-          relayRound += 1;
-          await waitAbortable(800);
-          if (aborter.signal.aborted) break;
+            const relayPrompt = `【群成员 ${reply.actorName} 刚刚 @你 说】\n${reply.content}`;
+            for (const targetId of mentionedIds) {
+              const targetActor = this.resolveActor(providers, targetId);
+              scheduleActor(targetActor, relayPrompt, roundLabel, myRound);
+            }
+          })();
 
-          const roundLabel =
-            autoRelayMaxRounds === -1
-              ? `无限互聊 · 第 ${relayRound} 轮`
-              : `互聊接力 · 第 ${relayRound}/${autoRelayMaxRounds} 轮`;
+          inFlight.add(taskPromise);
+          void taskPromise.finally(() => {
+            inFlight.delete(taskPromise);
+          });
+        };
 
-          const waveEntries = Array.from(nextTargetsMap.values());
-          lastWaveReplies = await Promise.all(
-            waveEntries.map(({ actor, triggers }) => {
-              const relayPrompt = triggers
-                .map((t) => `【群成员 ${t.from} 刚刚 @你 说】\n${t.text}`)
-                .join('\n\n---\n\n');
-              return dispatchOneActor(actor, relayPrompt, roundLabel, relayRound);
-            }),
-          );
+        // Round 0: launch all initial @mentioned actors concurrently without wave barrier
+        for (const actor of uniqueActors) {
+          scheduleActor(actor, contentWithAttachments, undefined, 0);
+        }
+
+        // Wait until every scheduled reply & downstream relay finishes (or is individually cancelled)
+        while (inFlight.size > 0) {
+          await Promise.allSettled(Array.from(inFlight));
         }
 
         if (aborter.signal.aborted && relayRound > 0) {
@@ -925,10 +1022,12 @@ ${promptBody}`;
           this.emitUpdate(run);
         }
       } finally {
-        if (this.aborters.get(run.id) === aborter) {
-          this.aborters.delete(run.id);
-        }
-        if (run.status === 'running' && !this.activePromises.has(run.id)) {
+        this.unregisterAborter(run.id, aborter);
+        if (
+          run.status === 'running' &&
+          !this.aborters.has(run.id) &&
+          !this.activePromises.has(run.id)
+        ) {
           run.status = 'idle';
           this.emitUpdate(run);
         }
@@ -938,13 +1037,55 @@ ${promptBody}`;
     return run;
   }
 
+  cancelMessage(runId: string, messageId: string): WorkflowRun | null {
+    const run = this.getRun(runId);
+    if (!run) return null;
+    const msgAborter = this.messageAborters.get(messageId);
+    if (msgAborter) {
+      try {
+        msgAborter.abort();
+      } catch {
+        // ignore
+      }
+      this.messageAborters.delete(messageId);
+    }
+    const targetMsg = run.messages.find((m) => m.id === messageId);
+    if (targetMsg && targetMsg.status === 'streaming') {
+      targetMsg.wakePrompt = undefined;
+      targetMsg.bridgeTaskId = undefined;
+      targetMsg.bridgeDirectPrompt = undefined;
+      targetMsg.status = 'error';
+      targetMsg.content = '已取消等待（跳过本条回复）';
+    }
+    const stillStreaming = run.messages.some((m) => m.status === 'streaming');
+    if (!stillStreaming && run.status === 'running' && !this.activePromises.has(run.id)) {
+      run.status = 'idle';
+    }
+    this.emitUpdate(run);
+    return run;
+  }
+
   abortRun(runId: string): WorkflowRun | null {
     const run = this.getRun(runId);
     if (!run) return null;
-    const aborter = this.aborters.get(runId);
-    if (aborter) {
-      aborter.abort();
-      this.aborters.delete(runId);
+    this.abortAllForRun(runId);
+    for (const msg of run.messages) {
+      if (msg.status === 'streaming') {
+        const ma = this.messageAborters.get(msg.id);
+        if (ma) {
+          try {
+            ma.abort();
+          } catch {
+            // ignore
+          }
+          this.messageAborters.delete(msg.id);
+        }
+        msg.wakePrompt = undefined;
+        msg.bridgeTaskId = undefined;
+        msg.bridgeDirectPrompt = undefined;
+        msg.status = 'error';
+        msg.content = '已手动停止等待';
+      }
     }
     for (const state of Object.values(run.nodes)) {
       if (state.status === 'running' || state.status === 'queued') {
@@ -1071,11 +1212,7 @@ ${promptBody}`;
     }
 
     // Abort any running step first
-    const existingAborter = this.aborters.get(runId);
-    if (existingAborter) {
-      existingAborter.abort();
-      this.aborters.delete(runId);
-    }
+    this.abortAllForRun(runId);
 
     // Find startNodeId + all downstream dependents via BFS
     const toReset = new Set<string>([startNodeId]);
@@ -1116,7 +1253,7 @@ ${promptBody}`;
     this.activePromises.add(runId);
 
     const aborter = new AbortController();
-    this.aborters.set(runId, aborter);
+    this.registerAborter(runId, aborter);
 
     try {
       const workflow = loadWorkflow();
@@ -1238,9 +1375,7 @@ ${promptBody}`;
       }
     } finally {
       this.activePromises.delete(runId);
-      if (this.aborters.get(runId) === aborter) {
-        this.aborters.delete(runId);
-      }
+      this.unregisterAborter(runId, aborter);
     }
   }
 
@@ -1355,12 +1490,36 @@ ${promptBody}`;
       status: 'streaming',
     });
 
-    const onNodeClaimed = () => {
-      if (chatMsg.wakePrompt) {
-        chatMsg.wakePrompt = undefined;
-        this.emitUpdate(run);
-      }
+    const onNodeClaimed = (via?: 'wait' | 'pull' | 'progress' | 'bridge') => {
+      chatMsg.wakePrompt = undefined;
+      chatMsg.bridgeTaskId = undefined;
+      chatMsg.bridgeDirectPrompt = undefined;
+      const suffix = via === 'bridge' ? '文件桥接 · 已回执' : '已接单 · 生成中';
+      chatMsg.stageTitle = `${node.title} · ${suffix}`;
+      this.appendNodeLog(run, node.id, `[${state.providerUsed}] ${suffix}`);
+      this.emitUpdate(run);
     };
+
+    const onNodeDispatched = (meta: {
+      taskId: string;
+      taskFilePath: string;
+      replyMdPath: string;
+      directPrompt: string;
+    }) => {
+      chatMsg.bridgeTaskId = meta.taskId;
+      chatMsg.bridgeDirectPrompt = meta.directPrompt;
+      this.emitUpdate(run);
+    };
+
+    const nodeAborter = new AbortController();
+    this.messageAborters.set(chatMsg.id, nodeAborter);
+    const forwardAbort = () => nodeAborter.abort();
+    if (signal.aborted) {
+      nodeAborter.abort();
+    } else {
+      signal.addEventListener('abort', forwardAbort, { once: true });
+    }
+    const nodeSignal = nodeAborter.signal;
 
     this.emitUpdate(run, {
       type: 'node_started',
@@ -1370,13 +1529,13 @@ ${promptBody}`;
 
     try {
       if (node.kind === 'review_loop') {
-        await this.executeReviewLoop(run, node, providers, useMock, signal);
+        await this.executeReviewLoop(run, node, providers, useMock, nodeSignal);
       } else if (node.kind === 'debate') {
-        await this.executeDebateNode(run, node, providers, useMock, signal);
+        await this.executeDebateNode(run, node, providers, useMock, nodeSignal);
       } else if (node.kind === 'consensus' && actor) {
-        await this.executeConsensusNode(run, node, actor, useMock, signal);
+        await this.executeConsensusNode(run, node, actor, useMock, nodeSignal);
       } else if (node.kind === 'shell') {
-        await this.executeShellNode(run, node, useMock, signal);
+        await this.executeShellNode(run, node, useMock, nodeSignal);
       } else if (node.kind === 'condition') {
         await this.executeConditionNode(run, node);
       } else if (node.kind === 'file_read') {
@@ -1384,22 +1543,26 @@ ${promptBody}`;
       } else if (node.kind === 'file_write') {
         await this.executeFileWriteNode(run, node);
       } else if (node.kind === 'http') {
-        await this.executeHttpNode(run, node, useMock, signal);
+        await this.executeHttpNode(run, node, useMock, nodeSignal);
       } else if (node.kind === 'delay') {
-        await this.executeDelayNode(run, node, useMock, signal);
+        await this.executeDelayNode(run, node, useMock, nodeSignal);
       } else if (actor) {
-        await this.executeLlmNode(run, node, actor, useMock, signal, onNodeClaimed);
+        await this.executeLlmNode(run, node, actor, useMock, nodeSignal, onNodeClaimed, onNodeDispatched);
       }
 
       state.status = 'completed';
       state.finishedAt = new Date().toISOString();
       state.durationMs = Date.now() - startMs;
       chatMsg.wakePrompt = undefined;
+      chatMsg.bridgeTaskId = undefined;
+      chatMsg.bridgeDirectPrompt = undefined;
+      chatMsg.stageTitle = node.title;
       chatMsg.status = 'done';
       chatMsg.content = state.output;
       chatMsg.logs = [...state.logs];
       chatMsg.commandPreview = state.commandPreview;
       chatMsg.durationMs = state.durationMs;
+      this.promoteMessageToActualOrder(run, chatMsg);
       if (actor && isModelNode && state.output) {
         const nodeUsage = normalizeTokenUsage(
           undefined,
@@ -1419,9 +1582,17 @@ ${promptBody}`;
         message: `完成「${node.title}」（耗时 ${(state.durationMs / 1000).toFixed(1)}s）`,
       });
     } catch (err) {
-      if (signal.aborted) {
+      chatMsg.wakePrompt = undefined;
+      chatMsg.bridgeTaskId = undefined;
+      chatMsg.bridgeDirectPrompt = undefined;
+      if (nodeSignal.aborted) {
+        state.status = 'failed';
+        state.finishedAt = new Date().toISOString();
+        state.durationMs = Date.now() - startMs;
+        state.error = signal.aborted ? '已被手动终止' : '已取消该节点等待';
         chatMsg.status = 'error';
-        chatMsg.content = '（已被手动终止）';
+        chatMsg.content = signal.aborted ? '（已被手动终止）' : '已取消等待（跳过本节点）';
+        this.emitUpdate(run);
         return;
       }
       state.status = 'failed';
@@ -1439,6 +1610,9 @@ ${promptBody}`;
         nodeId: node.id,
         message: `「${node.title}」执行失败：${state.error.slice(0, 100)}`,
       });
+    } finally {
+      signal.removeEventListener('abort', forwardAbort);
+      this.messageAborters.delete(chatMsg.id);
     }
   }
 
@@ -1454,7 +1628,13 @@ ${promptBody}`;
     },
     useMock: boolean,
     signal: AbortSignal,
-    onClaimed?: () => void,
+    onClaimed?: (via?: 'wait' | 'pull' | 'progress' | 'bridge') => void,
+    onDispatched?: (meta: {
+      taskId: string;
+      taskFilePath: string;
+      replyMdPath: string;
+      directPrompt: string;
+    }) => void,
   ): Promise<void> {
     const state = run.nodes[node.id];
     const [repoContext, gitSummary] = await Promise.all([
@@ -1473,7 +1653,7 @@ ${promptBody}`;
       .filter(Boolean)
       .join('\n\n---\n\n');
 
-    const materialsContext = this.buildMaterialsContext(run);
+    const materialsContext = this.buildMaterialsContext(run, actor.id);
     const renderedPrompt = this.renderTemplate(node.promptTemplate || '{{requirement}}\n\n【前序产出】\n{{previousOutput}}', {
       run,
       repoContext,
@@ -1503,6 +1683,7 @@ ${promptBody}`;
           signal,
           onLog: (chunk) => this.appendNodeLog(run, node.id, chunk),
           onClaimed,
+          onDispatched,
         },
       );
       return;

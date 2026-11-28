@@ -26,6 +26,7 @@ import {
   resolveCommandPath,
 } from './cliRunner.js';
 import { engine } from './engine.js';
+import { MCP_TOOLS, handleMcpJsonRpc, type JsonRpcRequest } from './mcpServer.js';
 import {
   deleteRun,
   getUploadsDir,
@@ -44,7 +45,13 @@ import {
   saveWorkflowTemplates,
   updateMemberQuota,
 } from './store.js';
-import { testWorkbenchPlugin, workbenchScheduler } from './workbench.js';
+import {
+  discoverLocalSkills,
+  importSkillsFromUrl,
+  testWorkbenchPlugin,
+  workbenchScheduler,
+} from './workbench.js';
+import { generateWorkflowFromPrompt } from './workflowGenerator.js';
 
 export interface StartServerOptions {
   port?: number;
@@ -76,6 +83,55 @@ export function createApp(options?: { distDir?: string; portHint?: number; host?
       dataDir: process.env.AGENT_WORKFLOW_DATA_DIR || path.resolve(process.cwd(), 'data'),
       platform: process.platform,
     });
+  });
+
+  // ===== Built-in Standard MCP Server (Streamable HTTP JSON-RPC 2.0) =====
+  app.get('/mcp', (_req, res) => {
+    res.json({
+      name: 'multi-agent-chatroom',
+      version: '1.0.0',
+      transport: 'streamable-http',
+      endpoint: '/mcp',
+      stdioCommand: 'chatroom mcp',
+      tools: MCP_TOOLS.map((t) => ({ name: t.name, description: t.description })),
+    });
+  });
+
+  app.post('/mcp', async (req, res) => {
+    const body = req.body;
+    const ac = new AbortController();
+    req.on('close', () => ac.abort());
+
+    try {
+      if (Array.isArray(body)) {
+        const results = [];
+        for (const item of body) {
+          const out = await handleMcpJsonRpc(item as JsonRpcRequest, ac.signal);
+          if (out) results.push(out);
+        }
+        if (results.length === 0) {
+          res.status(202).end();
+          return;
+        }
+        res.json(results);
+        return;
+      }
+      const out = await handleMcpJsonRpc((body || {}) as JsonRpcRequest, ac.signal);
+      if (!out) {
+        res.status(202).end();
+        return;
+      }
+      res.json(out);
+    } catch (err) {
+      res.status(500).json({
+        jsonrpc: '2.0',
+        id: (body as JsonRpcRequest | undefined)?.id ?? null,
+        error: {
+          code: -32603,
+          message: err instanceof Error ? err.message : 'Internal MCP error',
+        },
+      });
+    }
   });
 
   // ===== Self-Joining External Agent Protocol =====
@@ -351,13 +407,48 @@ export function createApp(options?: { distDir?: string; portHint?: number; host?
 
   app.get('/api/agents/:agentId/bridge', (req, res) => {
     const agentId = req.params.agentId;
-    const baseDir = agentHub.getAgentBridgeDir(agentId);
+    const dirs = agentHub.ensureBridgeWatcherScript(agentId);
     res.json({
       agentId,
-      bridgeDir: baseDir,
-      tasksDir: path.join(baseDir, 'tasks'),
-      repliesDir: path.join(baseDir, 'replies'),
-      stopFile: path.join(baseDir, 'STOP'),
+      bridgeDir: dirs.baseDir,
+      tasksDir: dirs.tasksDir,
+      repliesDir: dirs.repliesDir,
+      stopFile: dirs.stopFile,
+      watchPyPath: dirs.watchPyPath,
+    });
+  });
+
+  app.post('/api/agents/quick-bridge', (req, res) => {
+    const { name, avatar, roomId } = (req.body || {}) as {
+      name?: string;
+      avatar?: string;
+      roomId?: string;
+    };
+    const modelName = (name || '').trim() || 'AWS Quick';
+    const targetRoom = roomId || listRuns()[0]?.id;
+    const { agent, isReconnect } = agentHub.join({
+      model: modelName,
+      role: '文件夹桥接桌面 Agent（1秒自动回执）',
+      roomId: targetRoom,
+      trigger: { type: 'manual' },
+    });
+    if (avatar?.trim()) {
+      agentHub.updateAgent(agent.id, { avatar: avatar.trim() });
+    }
+    const dirs = agentHub.ensureBridgeWatcherScript(agent.id);
+    if (targetRoom && !isReconnect) {
+      engine.postSystemNotice(
+        targetRoom,
+        `📁 **${agent.name}** 已通过「一键文件夹桥接」加入聊天室`,
+      );
+    }
+    res.json({
+      ok: true,
+      agent: agentHub.getAgent(agent.id) || agent,
+      bridgeDir: dirs.baseDir,
+      tasksDir: dirs.tasksDir,
+      repliesDir: dirs.repliesDir,
+      watchPyPath: dirs.watchPyPath,
     });
   });
 
@@ -649,6 +740,77 @@ export function createApp(options?: { distDir?: string; portHint?: number; host?
     res.json(result);
   });
 
+  app.post('/api/providers/launch-terminal', (req, res) => {
+    const { command, title, autoRun } = (req.body || {}) as {
+      command?: string;
+      title?: string;
+      autoRun?: boolean;
+    };
+    const shouldAutoRun = autoRun !== false;
+    const cleanCmd = (command || '').trim();
+    if (shouldAutoRun && (!cleanCmd || cleanCmd.startsWith('#'))) {
+      res.status(400).json({ error: '请先填写可执行的终端命令（不能是注释）' });
+      return;
+    }
+    try {
+      const safeTitle = (title || 'Multi-Agent Terminal').replace(/['"`\r\n]/g, '').slice(0, 48);
+      if (process.platform === 'win32') {
+        const banner = cleanCmd.replace(/'/g, "''");
+        const innerLines = [
+          `$Host.UI.RawUI.WindowTitle = '${safeTitle}'`,
+          ...(shouldAutoRun
+            ? [
+                `Write-Host '>>> ${banner}' -ForegroundColor Cyan`,
+                cleanCmd,
+              ]
+            : cleanCmd && !cleanCmd.startsWith('#')
+              ? [
+                  `Write-Host '已复制命令到剪贴板，按 Ctrl+V 或右键即可粘贴执行：' -ForegroundColor Cyan`,
+                  `Write-Host '  ${banner}' -ForegroundColor Yellow`,
+                  `Write-Host ''`,
+                ]
+              : [
+                  `Write-Host '已打开本机终端，可直接粘贴命令执行。' -ForegroundColor Cyan`,
+                  `Write-Host ''`,
+                ]),
+        ];
+        const innerEncoded = Buffer.from(innerLines.join('; '), 'utf16le').toString('base64');
+        const launcherScript = `$p = Start-Process -FilePath 'powershell.exe' -ArgumentList @('-NoExit','-EncodedCommand','${innerEncoded}') -PassThru; Write-Output $p.Id`;
+        const launcherEncoded = Buffer.from(launcherScript, 'utf16le').toString('base64');
+        const pidOut = execFileSync(
+          'powershell.exe',
+          ['-NoProfile', '-WindowStyle', 'Hidden', '-EncodedCommand', launcherEncoded],
+          { encoding: 'utf8', windowsHide: true, timeout: 10000 },
+        ).trim();
+        res.json({ ok: true, launched: cleanCmd, autoRun: shouldAutoRun, pid: Number(pidOut) || undefined });
+        return;
+      } else if (process.platform === 'darwin') {
+        const script = shouldAutoRun
+          ? cleanCmd
+          : `echo 'Copied to clipboard - press Cmd+V to paste:'`;
+        const escaped = script.replace(/\\/g, '\\\\').replace(/"/g, '\\"');
+        const child = spawn(
+          'osascript',
+          ['-e', `tell application "Terminal" to do script "${escaped}"`, '-e', 'tell application "Terminal" to activate'],
+          { detached: true, stdio: 'ignore' },
+        );
+        child.unref();
+      } else {
+        const bashCmd = shouldAutoRun
+          ? `${cleanCmd}; exec bash`
+          : `echo 'Copied to clipboard - paste to run'; exec bash`;
+        const child = spawn('x-terminal-emulator', ['-e', 'bash', '-lc', bashCmd], {
+          detached: true,
+          stdio: 'ignore',
+        });
+        child.unref();
+      }
+      res.json({ ok: true, launched: cleanCmd, autoRun: shouldAutoRun });
+    } catch (err) {
+      res.status(500).json({ error: `打开本机终端失败：${err instanceof Error ? err.message : String(err)}` });
+    }
+  });
+
   // ===== Workbench (Skills, Plugins/MCP, Global Knowledge, Templates & Schedules) =====
   app.get('/api/workbench', (_req, res) => {
     res.json({ workbench: loadWorkbench() });
@@ -666,6 +828,23 @@ export function createApp(options?: { distDir?: string; portHint?: number; host?
     };
     saveWorkbench(next);
     res.json({ workbench: next });
+  });
+
+  app.get('/api/workbench/skills/discover', (req, res) => {
+    const cwd = typeof req.query.cwd === 'string' ? req.query.cwd : undefined;
+    const customDir = typeof req.query.dir === 'string' ? req.query.dir : undefined;
+    const result = discoverLocalSkills({ cwd, customDir });
+    res.json(result);
+  });
+
+  app.post('/api/workbench/skills/import-url', async (req, res) => {
+    try {
+      const url = typeof req.body?.url === 'string' ? req.body.url : '';
+      const result = await importSkillsFromUrl(url);
+      res.json(result);
+    } catch (err) {
+      res.status(400).json({ error: err instanceof Error ? err.message : String(err) });
+    }
   });
 
   app.post('/api/workbench/plugins/:id/test', async (req, res) => {
@@ -726,6 +905,41 @@ export function createApp(options?: { distDir?: string; portHint?: number; host?
   app.post('/api/workflow/reset', (_req, res) => {
     const workflow = resetWorkflow();
     res.json({ workflow });
+  });
+
+  app.post('/api/workflow/generate', async (req, res) => {
+    const ac = new AbortController();
+    const onClose = () => {
+      if (!res.writableEnded) ac.abort();
+    };
+    req.on('close', onClose);
+    try {
+      const body = (req.body || {}) as {
+        prompt?: string;
+        currentWorkflow?: WorkflowDefinition;
+        onlineMemberIds?: string[];
+        providerId?: string;
+        generatorId?: string;
+        apply?: boolean;
+      };
+      const result = await generateWorkflowFromPrompt({
+        prompt: body.prompt || '',
+        currentWorkflow: body.currentWorkflow,
+        onlineMemberIds: body.onlineMemberIds,
+        providerId: body.providerId || body.generatorId,
+        signal: ac.signal,
+      });
+      if (ac.signal.aborted || res.writableEnded) return;
+      if (body.apply !== false) {
+        saveWorkflow(result.workflow);
+      }
+      res.json(result);
+    } catch (err) {
+      if (ac.signal.aborted || res.writableEnded) return;
+      res.status(400).json({ error: err instanceof Error ? err.message : String(err) });
+    } finally {
+      req.off('close', onClose);
+    }
   });
 
   app.get('/api/workflow-templates', (_req, res) => {
@@ -798,7 +1012,7 @@ export function createApp(options?: { distDir?: string; portHint?: number; host?
 
   // ===== Runs =====
   app.get('/api/runs', (_req, res) => {
-    res.json({ runs: listRuns() });
+    res.json({ runs: engine.listRuns() });
   });
 
   app.post('/api/runs', (req, res) => {
@@ -876,6 +1090,15 @@ export function createApp(options?: { distDir?: string; portHint?: number; host?
 
   app.post('/api/runs/:id/abort', (req, res) => {
     const run = engine.abortRun(req.params.id);
+    if (!run) {
+      res.status(404).json({ error: '运行记录不存在' });
+      return;
+    }
+    res.json({ run });
+  });
+
+  app.post('/api/runs/:id/messages/:msgId/cancel', (req, res) => {
+    const run = engine.cancelMessage(req.params.id, req.params.msgId);
     if (!run) {
       res.status(404).json({ error: '运行记录不存在' });
       return;

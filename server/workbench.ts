@@ -1,4 +1,7 @@
 import { execFile } from 'node:child_process';
+import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
 import { promisify } from 'node:util';
 import type {
   ScheduledTask,
@@ -10,17 +13,23 @@ import { listRuns, loadWorkbench, saveWorkbench } from './store.js';
 
 const execFileAsync = promisify(execFile);
 
-export function buildGlobalWorkbenchContext(): string {
+export function buildGlobalWorkbenchContext(memberId?: string): string {
   const wb = loadWorkbench();
   const sections: string[] = [];
 
-  const activeSkills = wb.skills.filter((s) => s.enabled && s.autoInject && s.prompt.trim());
+  const activeSkills = wb.skills.filter((s) => {
+    if (!s.enabled || !s.autoInject || !s.prompt.trim()) return false;
+    if (Array.isArray(s.targetMemberIds) && s.targetMemberIds.length > 0) {
+      return Boolean(memberId && s.targetMemberIds.includes(memberId));
+    }
+    return true;
+  });
   if (activeSkills.length > 0) {
     sections.push(
-      '【已启用全局技能指令（Skills）】\n' +
+      '【已启用技能指令（Skills）】\n' +
         activeSkills
-          .slice(0, 6)
-          .map((s) => `- **${s.name}**：${s.prompt.trim().slice(0, 800)}`)
+          .slice(0, 10)
+          .map((s) => `- **${s.name}**：${s.prompt.trim().slice(0, 2400)}`)
           .join('\n'),
     );
   }
@@ -233,3 +242,257 @@ export class WorkbenchScheduler {
 }
 
 export const workbenchScheduler = new WorkbenchScheduler();
+
+export interface DiscoveredSkill {
+  key: string;
+  name: string;
+  description: string;
+  prompt: string;
+  trigger?: string;
+  source: string;
+  filePath: string;
+}
+
+export function parseSkillDocument(
+  rawText: string,
+  fallbackName: string,
+): Array<{ name: string; description: string; prompt: string; trigger?: string }> {
+  const trimmed = (rawText || '').replace(/^\uFEFF/, '').trim();
+  if (!trimmed) return [];
+
+  // Support JSON skill object or array
+  if (trimmed.startsWith('{') || trimmed.startsWith('[')) {
+    try {
+      const parsed = JSON.parse(trimmed) as unknown;
+      const list = Array.isArray(parsed)
+        ? parsed
+        : parsed && typeof parsed === 'object' && Array.isArray((parsed as { skills?: unknown[] }).skills)
+          ? (parsed as { skills: unknown[] }).skills
+          : [parsed];
+      const out: Array<{ name: string; description: string; prompt: string; trigger?: string }> = [];
+      for (const item of list) {
+        if (!item || typeof item !== 'object') continue;
+        const obj = item as Record<string, unknown>;
+        const prompt = String(obj.prompt || obj.content || obj.instructions || '').trim();
+        if (!prompt) continue;
+        const name = String(obj.name || obj.title || fallbackName || '未命名技能').trim();
+        const description = String(obj.description || '').trim() || prompt.slice(0, 80);
+        const trigger = typeof obj.trigger === 'string' && obj.trigger.trim() ? obj.trigger.trim() : undefined;
+        out.push({ name, description, prompt: prompt.slice(0, 12000), trigger });
+      }
+      if (out.length > 0) return out;
+    } catch {
+      // fall through to Markdown parsing
+    }
+  }
+
+  let name = fallbackName.trim() || '外部技能';
+  let description = '';
+  let trigger: string | undefined;
+  let body = trimmed;
+
+  // Parse YAML frontmatter (--- ... ---)
+  const fmMatch = trimmed.match(/^---\r?\n([\s\S]*?)\r?\n---\r?\n?([\s\S]*)$/);
+  if (fmMatch) {
+    const fmLines = fmMatch[1].split(/\r?\n/);
+    body = fmMatch[2].trim();
+
+    let currentKey = '';
+    const fmMap: Record<string, string> = {};
+    for (const line of fmLines) {
+      const keyMatch = line.match(/^([a-zA-Z0-9_-]+)\s*:\s*(.*)$/);
+      if (keyMatch && !line.startsWith(' ') && !line.startsWith('\t')) {
+        currentKey = keyMatch[1].toLowerCase();
+        const rawVal = keyMatch[2].trim();
+        if (rawVal === '|' || rawVal === '>' || rawVal === '|-' || rawVal === '>-') {
+          fmMap[currentKey] = '';
+        } else {
+          fmMap[currentKey] = rawVal.replace(/^['"]|['"]$/g, '');
+        }
+      } else if (currentKey && (line.startsWith(' ') || line.startsWith('\t'))) {
+        fmMap[currentKey] = `${fmMap[currentKey] ? `${fmMap[currentKey]} ` : ''}${line.trim()}`;
+      }
+    }
+
+    if (fmMap.name) name = fmMap.name.trim();
+    if (fmMap.description) description = fmMap.description.trim();
+    if (fmMap.trigger) trigger = fmMap.trigger.trim();
+  }
+
+  // Fallback heading extraction if name was generic (e.g. SKILL)
+  if (!name || /^skill$/i.test(name)) {
+    const h1 = body.match(/^#\s+(.+)$/m);
+    if (h1?.[1]?.trim()) {
+      name = h1[1].trim().slice(0, 60);
+    }
+  }
+
+  if (!description) {
+    const firstPara = body
+      .split(/\r?\n/)
+      .map((l) => l.trim())
+      .find((l) => l && !l.startsWith('#') && !l.startsWith('```') && !l.startsWith('---'));
+    description = (firstPara || '外部导入技能').slice(0, 120);
+  }
+
+  const finalPrompt = (body || trimmed).slice(0, 12000);
+  if (!finalPrompt) return [];
+  return [{ name, description, prompt: finalPrompt, trigger }];
+}
+
+export function discoverLocalSkills(options?: {
+  cwd?: string;
+  customDir?: string;
+}): { skills: DiscoveredSkill[]; scannedDirs: string[] } {
+  const home = os.homedir();
+  const candidates: Array<{ dir: string; source: string }> = [];
+
+  if (options?.customDir?.trim()) {
+    candidates.push({ dir: path.resolve(options.customDir.trim()), source: '指定目录' });
+  } else {
+    candidates.push(
+      { dir: path.join(home, '.agents', 'skills'), source: '本机 .agents' },
+      { dir: path.join(home, '.claude', 'skills'), source: 'Claude Code' },
+      { dir: path.join(home, '.codex', 'skills'), source: 'Codex' },
+      { dir: path.join(home, '.cursor', 'rules'), source: 'Cursor 全局' },
+    );
+    if (options?.cwd?.trim()) {
+      const root = path.resolve(options.cwd.trim());
+      candidates.push(
+        { dir: path.join(root, '.claude', 'skills'), source: '当前项目 .claude' },
+        { dir: path.join(root, '.agents', 'skills'), source: '当前项目 .agents' },
+        { dir: path.join(root, '.cursor', 'rules'), source: '当前项目 Cursor' },
+        { dir: path.join(root, 'skills'), source: '当前项目 skills' },
+      );
+    }
+  }
+
+  const scannedDirs: string[] = [];
+  const seenFiles = new Set<string>();
+  const skills: DiscoveredSkill[] = [];
+
+  const tryReadSkillFile = (filePath: string, source: string, fallbackName: string) => {
+    const resolved = path.resolve(filePath);
+    if (seenFiles.has(resolved)) return;
+    try {
+      const stat = fs.statSync(resolved);
+      if (!stat.isFile() || stat.size === 0 || stat.size > 512 * 1024) return;
+      seenFiles.add(resolved);
+      const raw = fs.readFileSync(resolved, 'utf8');
+      const parsed = parseSkillDocument(raw, fallbackName);
+      for (let i = 0; i < parsed.length; i += 1) {
+        const p = parsed[i];
+        skills.push({
+          key: `${resolved}#${i}`,
+          name: p.name,
+          description: p.description,
+          prompt: p.prompt,
+          trigger: p.trigger,
+          source,
+          filePath: resolved,
+        });
+      }
+    } catch {
+      // skip unreadable files
+    }
+  };
+
+  for (const { dir, source } of candidates) {
+    if (!fs.existsSync(dir)) continue;
+    try {
+      const stat = fs.statSync(dir);
+      if (stat.isFile()) {
+        scannedDirs.push(dir);
+        tryReadSkillFile(dir, source, path.basename(dir, path.extname(dir)));
+        continue;
+      }
+      if (!stat.isDirectory()) continue;
+      scannedDirs.push(dir);
+      const entries = fs.readdirSync(dir, { withFileTypes: true });
+      for (const entry of entries) {
+        const full = path.join(dir, entry.name);
+        if (entry.isDirectory()) {
+          if (entry.name.startsWith('.') || entry.name === 'node_modules') continue;
+          const skillMd = path.join(full, 'SKILL.md');
+          const lowerMd = path.join(full, 'skill.md');
+          if (fs.existsSync(skillMd)) {
+            tryReadSkillFile(skillMd, source, entry.name);
+          } else if (fs.existsSync(lowerMd)) {
+            tryReadSkillFile(lowerMd, source, entry.name);
+          }
+        } else if (entry.isFile() && /\.(md|mdc|txt|json)$/i.test(entry.name)) {
+          if (/^readme\.md$/i.test(entry.name)) continue;
+          const base = path.basename(entry.name, path.extname(entry.name));
+          tryReadSkillFile(full, source, base);
+        }
+      }
+    } catch {
+      // ignore unreadable directories
+    }
+  }
+
+  return { skills, scannedDirs };
+}
+
+export async function importSkillsFromUrl(rawUrl: string): Promise<{
+  resolvedUrl: string;
+  skills: Array<{ name: string; description: string; prompt: string; trigger?: string }>;
+}> {
+  const input = (rawUrl || '').trim();
+  let parsedUrl: URL;
+  try {
+    parsedUrl = new URL(input);
+  } catch {
+    throw new Error('请输入有效的 http:// 或 https:// 链接');
+  }
+  if (parsedUrl.protocol !== 'http:' && parsedUrl.protocol !== 'https:') {
+    throw new Error('仅支持 http:// 或 https:// 链接');
+  }
+
+  // Convert standard GitHub blob URL to raw.githubusercontent.com
+  let resolvedUrl = parsedUrl.toString();
+  const ghBlob = resolvedUrl.match(
+    /^https?:\/\/github\.com\/([^/]+)\/([^/]+)\/blob\/([^/]+)\/(.+)$/i,
+  );
+  if (ghBlob) {
+    resolvedUrl = `https://raw.githubusercontent.com/${ghBlob[1]}/${ghBlob[2]}/${ghBlob[3]}/${ghBlob[4]}`;
+  }
+
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), 12000);
+  try {
+    const res = await fetch(resolvedUrl, {
+      signal: controller.signal,
+      headers: {
+        Accept: 'text/plain, text/markdown, application/json, */*',
+        'User-Agent': 'Multi-Agent-Workflow-SkillImporter/1.0',
+      },
+    });
+    if (!res.ok) {
+      throw new Error(`拉取失败（HTTP ${res.status}），请确认链接可公开访问`);
+    }
+    const text = await res.text();
+    if (text.length > 512 * 1024) {
+      throw new Error('目标文件过大（超过 512 KB）');
+    }
+    const pathSegs = new URL(resolvedUrl).pathname.split('/').filter(Boolean);
+    const fileSeg = pathSegs[pathSegs.length - 1] || 'remote-skill';
+    const parentSeg = pathSegs.length >= 2 ? pathSegs[pathSegs.length - 2] : '';
+    const fallbackName = /^skill\.md$/i.test(fileSeg) && parentSeg
+      ? parentSeg
+      : fileSeg.replace(/\.(md|mdc|txt|json)$/i, '') || '外部链接技能';
+
+    const skills = parseSkillDocument(text, fallbackName);
+    if (skills.length === 0) {
+      throw new Error('未能从该链接解析出有效的 Skill 内容');
+    }
+    return { resolvedUrl, skills };
+  } catch (err) {
+    if (err instanceof Error && err.name === 'AbortError') {
+      throw new Error('拉取超时（12 秒），请检查网络或链接是否可达');
+    }
+    throw err;
+  } finally {
+    clearTimeout(timer);
+  }
+}

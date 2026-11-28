@@ -1,6 +1,7 @@
 import React, { useMemo } from 'react';
 import type { WorkflowRun } from '../../shared/types';
 import { BRAND } from '../brand';
+import { useI18n } from '../i18n';
 import { RinneMascot } from './RinneMascot';
 import { EventHorizonEye } from './EventHorizonEye';
 
@@ -84,6 +85,7 @@ function useDaily(runs: WorkflowRun[]) {
 
 /** FIG.1 — this issue's lineup: how many workflow steps each member owns */
 const LineupPlate: React.FC<{ steps: CoverStep[] }> = ({ steps }) => {
+  const { tr } = useI18n();
   const owners = useMemo(() => {
     const m = new Map<string, number>();
     steps.forEach((s) => m.set(s.owner, (m.get(s.owner) || 0) + 1));
@@ -94,7 +96,7 @@ const LineupPlate: React.FC<{ steps: CoverStep[] }> = ({ steps }) => {
     <figure className="jr-plate is-tilt-l">
       <div className="jr-plate-art">
         {owners.length === 0 ? (
-          <p className="jr-plate-empty">还没有配置工作流步骤。</p>
+          <p className="jr-plate-empty">{tr('还没有配置工作流步骤。', 'No workflow steps configured yet.')}</p>
         ) : (
           <svg viewBox="0 0 240 104" className="jr-chart">
             {owners.map(([name, n], i) => {
@@ -117,7 +119,7 @@ const LineupPlate: React.FC<{ steps: CoverStep[] }> = ({ steps }) => {
         )}
       </div>
       <figcaption>
-        <b>FIG.1</b> 本期阵容 <span>steps per member</span>
+        <b>FIG.1</b> {tr('本期阵容', 'Lineup')} <span>steps per member</span>
       </figcaption>
     </figure>
   );
@@ -125,6 +127,7 @@ const LineupPlate: React.FC<{ steps: CoverStep[] }> = ({ steps }) => {
 
 /** FIG.2 — columns, messages per day over the last 7 days */
 const DailyPlate: React.FC<{ days: { t: number; n: number }[] }> = ({ days }) => {
+  const { tr } = useI18n();
   const max = Math.max(1, ...days.map((d) => d.n));
   const label = (t: number) => {
     const d = new Date(t);
@@ -155,7 +158,7 @@ const DailyPlate: React.FC<{ days: { t: number; n: number }[] }> = ({ days }) =>
         </svg>
       </div>
       <figcaption>
-        <b>FIG.2</b> 近 7 日消息量 <span>messages per day</span>
+        <b>FIG.2</b> {tr('近 7 日消息量', '7-Day Activity')} <span>messages per day</span>
       </figcaption>
     </figure>
   );
@@ -174,6 +177,7 @@ export const JournalCover: React.FC<JournalCoverProps> = ({
   onOpenSteps,
   runs,
 }) => {
+  const { isEn, tr } = useI18n();
   const days = useDaily(runs);
   const fit = mastheadFit(issue.title);
   const issueNo = `No.${String(issue.no).padStart(2, '0')}`;
@@ -209,30 +213,46 @@ export const JournalCover: React.FC<JournalCoverProps> = ({
 
       <div className="jr-issue">
         <span>
-          {workflowName} · {steps.length} 个板块
+          {workflowName} · {isEn ? `${steps.length} stages` : `${steps.length} 个板块`}
         </span>
         <span>
-          {issue.statusLabel} · {issue.messageCount} 条消息
+          {issue.statusLabel} · {isEn ? `${issue.messageCount} messages` : `${issue.messageCount} 条消息`}
         </span>
       </div>
 
       <div className="jr-body">
         <div className="jr-lead">
-          <span className="jr-kicker">{brief ? '本期需求 · BRIEF' : BRAND.kicker}</span>
+          <span className="jr-kicker">
+            {brief ? tr('本期需求 · BRIEF', 'CURRENT BRIEF') : BRAND.kicker}
+          </span>
           {brief ? (
             <p className="jr-brief">{brief}</p>
           ) : (
             <>
               <h2 className="jr-headline">
-                {BRAND.headline[0]}
-                <br />
-                {BRAND.headline[1]}
+                {isEn ? (
+                  <>
+                    One local room,
+                    <br />
+                    every model in sync.
+                  </>
+                ) : (
+                  <>
+                    {BRAND.headline[0]}
+                    <br />
+                    {BRAND.headline[1]}
+                  </>
+                )}
               </h2>
-              <p className="jr-dek">{BRAND.dek}</p>
+              <p className="jr-dek">
+                {isEn
+                  ? 'Mention models in parallel, run visual multi-step DAGs, and keep all code & keys strictly on localhost.'
+                  : BRAND.dek}
+              </p>
             </>
           )}
           <div className="jr-quick">
-            <span className="jr-quick-label">快速开始</span>
+            <span className="jr-quick-label">{tr('快速开始', 'Quick Start')}</span>
             {quickActions.map((a) => (
               <button key={a.label} type="button" className="jr-quick-btn" onClick={a.onPick}>
                 {a.label}
@@ -241,9 +261,14 @@ export const JournalCover: React.FC<JournalCoverProps> = ({
           </div>
         </div>
 
-        <nav className="jr-contents" aria-label="工作流步骤">
-          <button type="button" className="jr-contents-head" onClick={onOpenSteps} title="在画布中打开工作流">
-            本期 · CONTENTS <span>打开画布 →</span>
+        <nav className="jr-contents" aria-label={tr('工作流步骤', 'Workflow Steps')}>
+          <button
+            type="button"
+            className="jr-contents-head"
+            onClick={onOpenSteps}
+            title={tr('在画布中打开工作流', 'Open workflow in canvas')}
+          >
+            {tr('本期 · CONTENTS', 'STEPS · CONTENTS')} <span>{tr('打开画布 →', 'Open Canvas →')}</span>
           </button>
           {steps.map((step, i) => (
             <button key={step.id} type="button" className="jr-step" onClick={onOpenSteps}>
