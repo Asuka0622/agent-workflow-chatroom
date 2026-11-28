@@ -10,13 +10,15 @@ interface RinneMascotProps {
   line?: string;
 }
 
-// Art lives in public/mascot (see docs/mascot/RINNE.md). Missing files fall back to idle, then a placeholder.
+// Art lives in public/mascot (see docs/mascot/RINNE.md). Painted PNGs win over the vector SVGs from
+// scripts/mascot/build-rinne.mjs; missing states fall back to idle, then to a placeholder.
 // Relative to index.html so it works both from the local server and a file:// desktop build
 const MASCOT_BASE = './mascot/';
 const failedSources = new Set<string>();
 
 function candidates(variant: 'hero' | 'dock', state: RinneState): string[] {
-  const list = variant === 'hero' ? ['rinne-hero.png', 'rinne-idle.png'] : [`rinne-${state}.png`, 'rinne-idle.png'];
+  const names = variant === 'hero' ? ['rinne-hero', 'rinne-idle'] : [`rinne-${state}`, 'rinne-idle'];
+  const list = names.flatMap((n) => [`${n}.png`, `${n}.svg`]);
   return Array.from(new Set(list)).map((f) => MASCOT_BASE + f);
 }
 

@@ -8251,3 +8251,11 @@ button.jr-contents-head span {
   left: 40px;
   right: auto;
 }
+
+/* Hero figure on the journal cover: start just below the top bar so her head is never clipped */
+.jr-cover .rinne-hero:not(.is-eye-only) {
+  top: calc(-1 * clamp(96px, 13vh, 116px) + 4px);
+  right: 10px;
+  width: 236px;
+  height: 284px;
+}
