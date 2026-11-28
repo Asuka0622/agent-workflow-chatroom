@@ -1,8 +1,18 @@
 # 看板娘「环音 / Rinne」角色设定与出图规范
 
-TIMELESS // STUDIO 的原创看板娘。本文件给 AI 生图用：设定、提示词、表情清单、文件规范一应俱全，出完图按「文件规范」放进 `public/mascot/` 即可，界面会自动换上。
+**RINNE RELAY**（`MULTI-AGENT RELAY` / `RN`）的原创看板娘。本文件给 AI 生图用：设定、提示词、表情清单、文件规范与当前同步进度一应俱全，出完图按「文件规范」放进 `public/mascot/` 即可，界面会自动优先加载 `.png` 替换矢量 `.svg` 占位图。
 
 > 原创边界：只借参考图的**风格**（高调白蓝、细线稿、钴蓝轨道、柠檬黄点缀、科技 HUD），**不借角色**。人物、发型配色、服装、徽记、签名都不能接近参考图或任何游戏角色。提示词里不要写任何游戏名、角色名、画师名。
+
+---
+
+## 0. 当前项目与立绘同步进度（2026-11-28）
+
+- **品牌与界面已定稿**：品牌标识为 `RINNE RELAY`（`VOL.01` / `RN`），支持浅色与深色双主题、杂志封面空态（`JournalCover`）与右下角悬浮停靠（`dock`）。
+- **组件加载规则（[RinneMascot.tsx](../../src/components/RinneMascot.tsx)）**：
+  - 优先查找 `public/mascot/rinne-<state>.png`，缺失时自动回退到矢量占位 `rinne-<state>.svg` → `rinne-idle.png/.svg` → 内置剪影。
+  - 目前 `public/mascot/` 下 **9 张精绘透明底 `.png` 已全部生成并就位**（`hero` 1000×1200、`idle/listening/working/approval/error/done/sleep` 800×800、`avatar` 512×512），界面自动优先渲染精绘立绘。
+- **最新协作场景（供表情与道具呼应）**：多模型并行群聊与可设/无限互聊接力、工作区代码分屏（持久化）、可视化 12 节点画布、MCP Server / 文件桥接 / 保活待命监听、Token 消耗与订阅制 `%` / 积分追踪。
 
 ---
 

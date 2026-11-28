@@ -29,7 +29,7 @@ export const NewRunModal: React.FC<NewRunModalProps> = ({
   const [requirement, setRequirement] = useState('');
   const [repoPath, setRepoPath] = useState(defaultRepoPath);
   const [branchName, setBranchName] = useState('');
-  const [executionMode, setExecutionMode] = useState<ExecutionMode>('mock');
+  const [executionMode, setExecutionMode] = useState<ExecutionMode>('real');
   const [checkCommand, setCheckCommand] = useState('npm run typecheck');
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState('');
@@ -70,28 +70,6 @@ export const NewRunModal: React.FC<NewRunModalProps> = ({
 
         <form onSubmit={handleSubmit}>
           <div className="modal-body">
-            <div className="field">
-              <label>运行模式</label>
-              <div className="grid-2">
-                <button
-                  type="button"
-                  className={`btn ${executionMode === 'mock' ? 'btn-primary' : ''}`}
-                  style={{ height: 38 }}
-                  onClick={() => setExecutionMode('mock')}
-                >
-                  模拟演练（不耗额度）
-                </button>
-                <button
-                  type="button"
-                  className={`btn ${executionMode === 'real' ? 'btn-success' : ''}`}
-                  style={{ height: 38 }}
-                  onClick={() => setExecutionMode('real')}
-                >
-                  真实订阅 CLI
-                </button>
-              </div>
-            </div>
-
             <div className="field">
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 6 }}>
                 <label style={{ margin: 0 }}>需求描述 *</label>
@@ -164,6 +142,24 @@ export const NewRunModal: React.FC<NewRunModalProps> = ({
                   />
                 </div>
               </div>
+              <label
+                style={{
+                  display: 'inline-flex',
+                  alignItems: 'center',
+                  gap: 6,
+                  marginTop: 10,
+                  fontSize: 12,
+                  color: 'var(--text-secondary)',
+                  cursor: 'pointer',
+                }}
+              >
+                <input
+                  type="checkbox"
+                  checked={executionMode === 'mock'}
+                  onChange={(e) => setExecutionMode(e.target.checked ? 'mock' : 'real')}
+                />
+                演练模式（仅测试流程流转，不消耗模型额度）
+              </label>
             </details>
 
             {error && (

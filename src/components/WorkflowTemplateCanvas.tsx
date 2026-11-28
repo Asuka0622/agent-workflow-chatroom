@@ -37,6 +37,7 @@ import {
   GitFork,
   Globe,
   Hand,
+  HelpCircle,
   Layers,
   LayoutGrid,
   Loader2,
@@ -51,8 +52,10 @@ import {
   Scale,
   SkipForward,
   Sparkles,
+  Square,
   Terminal,
   Trash2,
+  Upload,
   User,
   X,
 } from 'lucide-react';
@@ -73,6 +76,8 @@ type CanvasTab = 'canvas' | 'artifacts';
 interface CanvasNodeData extends Record<string, unknown> {
   config: WorkflowNodeConfig;
   state?: NodeExecutionState;
+  nowTick?: number;
+  flowHint?: { label: string; tone: 'parallel' | 'merge' | 'chain' };
   providers: ProviderConfig[];
   selected: boolean;
   onQuickModelChange: (nodeId: string, providerId: string) => void;
@@ -287,6 +292,8 @@ const CanvasStepNode: React.FC<NodeProps<Node<CanvasNodeData>>> = ({ data }) => 
   const {
     config,
     state,
+    nowTick,
+    flowHint,
     providers,
     selected,
     onQuickModelChange,
@@ -303,13 +310,19 @@ const CanvasStepNode: React.FC<NodeProps<Node<CanvasNodeData>>> = ({ data }) => 
   const hasOutput = Boolean(state?.output?.trim());
   const isModelNode = MODEL_NODE_KINDS.has(config.kind);
   const isCondition = config.kind === 'condition';
+  const runningElapsedSec =
+    status === 'running' && state?.startedAt
+      ? Math.max(0, Math.floor(((nowTick || Date.now()) - new Date(state.startedAt).getTime()) / 1000))
+      : null;
+  const latestLogLine =
+    state?.logs && state.logs.length > 0 ? state.logs[state.logs.length - 1] : '';
 
   const statusPill = (() => {
     switch (status) {
       case 'running':
         return {
           icon: <Loader2 size={11} className="spin" />,
-          text: state?.round ? `第${state.round}轮` : '运行中',
+          text: `${state?.round ? `第${state.round}轮` : '运行中'}${runningElapsedSec !== null ? ` ${runningElapsedSec}s` : ''}`,
           cls: 'is-running',
         };
       case 'waiting_approval':
@@ -420,6 +433,23 @@ const CanvasStepNode: React.FC<NodeProps<Node<CanvasNodeData>>> = ({ data }) => 
         </div>
       )}
 
+      {flowHint && (
+        <div className={`cc-node-flow-hint tone-${flowHint.tone}`} title={flowHint.label}>
+          {flowHint.label}
+        </div>
+      )}
+
+      {(status === 'running' || (status === 'failed' && state?.error)) && (
+        <div
+          className={`cc-node-live-log ${status === 'failed' ? 'is-err' : ''}`}
+          title={status === 'failed' ? state?.error : latestLogLine || '正在执行节点…'}
+        >
+          {status === 'failed'
+            ? state?.error
+            : latestLogLine || `${state?.providerUsed || provider?.shortName || '模型'} 正在处理中…`}
+        </div>
+      )}
+
       <div className="cc-node-foot">
         {isModelNode ? (
           <div className="cc-model-wrap nodrag nopan" onClick={(e) => e.stopPropagation()}>
@@ -525,8 +555,16 @@ export interface WorkflowTemplateCanvasProps {
   onSaveNode: (updated: WorkflowNodeConfig) => Promise<void>;
   onApplyTemplate: (templateId: string) => Promise<void>;
   onSaveAsTemplate: (name: string, description: string) => Promise<void>;
+  onCreateBlankCanvas?: () => Promise<void>;
   onDeleteTemplate: (templateId: string) => Promise<void>;
-  onRunWorkflow: (promptText?: string) => void;
+  onAutoAssignModels?: () => Promise<void>;
+  onGenerateWorkflow?: (prompt: string, generatorId?: string) => Promise<void>;
+  onCancelGenerateWorkflow?: () => void;
+  aiGeneratorOptions?: Array<{ id: string; label: string; group: 'agent' | 'api' }>;
+  aiGeneratorId?: string;
+  onChangeAiGeneratorId?: (id: string) => void;
+  onRunWorkflow: (promptText?: string, dryRun?: boolean) => void;
+  onAbortWorkflow?: () => void;
   onRerunFromNode: (nodeId: string) => void;
   onOpenApproval: () => void;
   onExportMarkdown: () => Promise<void>;
@@ -547,8 +585,16 @@ const InnerWorkflowCanvas: React.FC<WorkflowTemplateCanvasProps> = ({
   onSaveNode,
   onApplyTemplate,
   onSaveAsTemplate,
+  onCreateBlankCanvas,
   onDeleteTemplate,
+  onAutoAssignModels,
+  onGenerateWorkflow,
+  onCancelGenerateWorkflow,
+  aiGeneratorOptions = [],
+  aiGeneratorId = 'auto',
+  onChangeAiGeneratorId,
   onRunWorkflow,
+  onAbortWorkflow,
   onRerunFromNode,
   onOpenApproval,
   onExportMarkdown,
@@ -570,6 +616,28 @@ const InnerWorkflowCanvas: React.FC<WorkflowTemplateCanvasProps> = ({
   // Quick inline run prompt
   const [showQuickRunPrompt, setShowQuickRunPrompt] = useState(false);
   const [quickRunText, setQuickRunText] = useState('');
+
+  // AI workflow generator bar + JSON import ref + compact usage guide
+  const [showAiBar, setShowAiBar] = useState(false);
+  const [showUsageGuide, setShowUsageGuide] = useState(false);
+  const [aiPromptText, setAiPromptText] = useState('');
+  const [aiGenerating, setAiGenerating] = useState(false);
+  const jsonImportRef = useRef<HTMLInputElement | null>(null);
+
+  // Live 1s elapsed timer while any workflow node is running
+  const hasRunningWorkflowNode = useMemo(
+    () =>
+      run?.status === 'running' ||
+      workflow.nodes.some((n) => run?.nodes[n.id]?.status === 'running'),
+    [run, workflow.nodes],
+  );
+  const [nowTick, setNowTick] = useState(() => Date.now());
+  useEffect(() => {
+    if (!hasRunningWorkflowNode) return;
+    setNowTick(Date.now());
+    const id = window.setInterval(() => setNowTick(Date.now()), 1000);
+    return () => window.clearInterval(id);
+  }, [hasRunningWorkflowNode]);
 
   // Inspector local drafts
   const [draftTitle, setDraftTitle] = useState('');
@@ -831,30 +899,61 @@ const InnerWorkflowCanvas: React.FC<WorkflowTemplateCanvasProps> = ({
   );
 
   const computedNodes = useMemo<Node<CanvasNodeData>[]>(() => {
-    return workflow.nodes.map((cfg) => ({
-      id: cfg.id,
-      type: 'canvasStep',
-      position: resolvedPositions[cfg.id] || { x: 240, y: 40 },
-      draggable: true,
-      data: {
-        config: cfg,
-        state: run?.nodes[cfg.id],
-        providers,
-        selected: selectedNodeId === cfg.id,
-        onQuickModelChange: handleQuickModelChange,
-        onQuickToggleEnabled: handleQuickToggleEnabled,
-        onQuickAddChild: handleQuickAddChild,
-        onOpenArtifact: handleOpenArtifact,
-        onSelectNode: (nid) => {
-          setSelectedNodeId(nid);
-          setShowNodePalette(false);
+    const enabledList = workflow.nodes.filter((n) => n.enabled !== false);
+    const nodeById = new Map(workflow.nodes.map((n) => [n.id, n]));
+    const parentSigCounts = new Map<string, number>();
+    for (const n of enabledList) {
+      if (n.kind === 'human_input') continue;
+      const sig = [...(n.dependsOn || [])].sort().join('|');
+      if (sig) parentSigCounts.set(sig, (parentSigCounts.get(sig) || 0) + 1);
+    }
+
+    return workflow.nodes.map((cfg) => {
+      let flowHint: CanvasNodeData['flowHint'];
+      if (cfg.kind !== 'human_input' && cfg.enabled !== false) {
+        const deps = cfg.dependsOn || [];
+        const sig = [...deps].sort().join('|');
+        if (deps.length >= 2) {
+          flowHint = { label: `汇合 ${deps.length} 路结果（可见全部上游）`, tone: 'merge' };
+        } else if (sig && (parentSigCounts.get(sig) || 0) >= 2) {
+          flowHint = { label: '并行盲跑（彼此看不到对方输出）', tone: 'parallel' };
+        } else if (deps.length === 1) {
+          const parent = nodeById.get(deps[0]);
+          if (parent && parent.kind !== 'human_input') {
+            flowHint = { label: `接续「${parent.title}」输出`, tone: 'chain' };
+          }
+        }
+      }
+
+      return {
+        id: cfg.id,
+        type: 'canvasStep',
+        position: resolvedPositions[cfg.id] || { x: 240, y: 40 },
+        draggable: true,
+        data: {
+          config: cfg,
+          state: run?.nodes[cfg.id],
+          nowTick: hasRunningWorkflowNode ? nowTick : undefined,
+          flowHint,
+          providers,
+          selected: selectedNodeId === cfg.id,
+          onQuickModelChange: handleQuickModelChange,
+          onQuickToggleEnabled: handleQuickToggleEnabled,
+          onQuickAddChild: handleQuickAddChild,
+          onOpenArtifact: handleOpenArtifact,
+          onSelectNode: (nid) => {
+            setSelectedNodeId(nid);
+            setShowNodePalette(false);
+          },
         },
-      },
-    }));
+      };
+    });
   }, [
     workflow.nodes,
     resolvedPositions,
     run,
+    hasRunningWorkflowNode,
+    nowTick,
     providers,
     selectedNodeId,
     handleQuickModelChange,
@@ -1149,10 +1248,247 @@ const InnerWorkflowCanvas: React.FC<WorkflowTemplateCanvasProps> = ({
     null;
 
   const isWaitingApproval = run?.status === 'waiting_approval';
-  const progressDone = workflow.nodes.filter(
-    (n) => n.enabled !== false && run?.nodes[n.id]?.status === 'completed',
+  const isWorkflowRunning =
+    run?.status === 'running' ||
+    workflow.nodes.some((n) => n.enabled !== false && run?.nodes[n.id]?.status === 'running');
+  const enabledNodes = workflow.nodes.filter((n) => n.enabled !== false);
+  const progressDone = enabledNodes.filter(
+    (n) => run?.nodes[n.id]?.status === 'completed',
   ).length;
-  const progressTotal = workflow.nodes.filter((n) => n.enabled !== false).length || 1;
+  const progressTotal = enabledNodes.length || 1;
+  const progressPct = Math.round((progressDone / progressTotal) * 100);
+  const activeRunNodes = enabledNodes
+    .map((n) => ({ node: n, state: run?.nodes[n.id] }))
+    .filter(
+      (item): item is { node: WorkflowNodeConfig; state: NodeExecutionState } =>
+        Boolean(
+          item.state &&
+            (item.state.status === 'running' ||
+              item.state.status === 'waiting_approval' ||
+              item.state.status === 'failed'),
+        ),
+    );
+  const showProgressStrip = Boolean(
+    run &&
+      (isWorkflowRunning ||
+        isWaitingApproval ||
+        activeRunNodes.length > 0 ||
+        (Boolean(run.requirement) && progressDone > 0)),
+  );
+  const selectedNodeState = selectedNode ? run?.nodes[selectedNode.id] : undefined;
+
+  // Detect unmerged parallel AI branches so new users don't accidentally run blind parallel dead-ends
+  const unmergedParallelLeaves = useMemo(() => {
+    const enabled = workflow.nodes.filter((n) => n.enabled !== false);
+    const referencedAsUpstream = new Set<string>();
+    for (const n of enabled) {
+      for (const dep of n.dependsOn || []) referencedAsUpstream.add(dep);
+    }
+    return enabled.filter(
+      (n) =>
+        MODEL_NODE_KINDS.has(n.kind) &&
+        !referencedAsUpstream.has(n.id),
+    );
+  }, [workflow.nodes]);
+
+  const pickModelIdsForStarter = () => {
+    const onlineFirst = providers
+      .filter((p) => p.command === 'agent-join')
+      .map((p) => p.id);
+    const fallback = providers.map((p) => p.id);
+    const pool = onlineFirst.length > 0 ? onlineFirst : fallback;
+    return {
+      a: pool[0] || '',
+      b: pool[1] || pool[0] || '',
+      c: pool[2] || pool[0] || '',
+    };
+  };
+
+  const handleAddMergeJudgeNode = async () => {
+    if (unmergedParallelLeaves.length < 2) return;
+    const wf = workflowRef.current;
+    const { c } = pickModelIdsForStarter();
+    const id = `judge_${Date.now().toString(36).slice(-5)}`;
+    const mergeNode: WorkflowNodeConfig = {
+      id,
+      title: '汇总与裁决',
+      subtitle: '收齐上方所有并行结果，统一对比 / 判分 / 给终稿',
+      lane: 'release',
+      kind: 'consensus',
+      providerId: c,
+      enabled: true,
+      dependsOn: unmergedParallelLeaves.map((n) => n.id),
+      position: { x: 0, y: 0 },
+      promptTemplate:
+        '你是公正的汇总裁判（当前模型：{{providerName}}）。上游有多路并行成员互相盲跑产出了各自结果，请把所有上游输出放在一起逐项核对、对比优劣或统一判定胜负，并给出清晰结论。\n\n【原始任务】\n{{requirement}}\n\n【上游各路并行输出】\n{{previousOutput}}',
+    };
+    const nextNodes = [...wf.nodes, mergeNode];
+    const layout = computeAutoLayout(nextNodes);
+    const positioned = nextNodes.map((n) => ({ ...n, position: layout[n.id] }));
+    const nextEdges = buildEdgesFromNodes(positioned, wf.edges);
+    await onSaveWorkflow(
+      { ...wf, nodes: positioned, edges: nextEdges },
+      '已补齐下游「汇总与裁决」节点并自动连线排版',
+    );
+    setSelectedNodeId(id);
+  };
+
+  const handleChainParallelLeaves = async () => {
+    if (unmergedParallelLeaves.length < 2) return;
+    const wf = workflowRef.current;
+    const leafIds = unmergedParallelLeaves.map((n) => n.id);
+    const nextNodes = wf.nodes.map((n) => {
+      const idx = leafIds.indexOf(n.id);
+      if (idx > 0) {
+        return { ...n, dependsOn: [leafIds[idx - 1]] };
+      }
+      return n;
+    });
+    const layout = computeAutoLayout(nextNodes);
+    const positioned = nextNodes.map((n) => ({ ...n, position: layout[n.id] }));
+    const nextEdges = buildEdgesFromNodes(positioned);
+    await onSaveWorkflow(
+      { ...wf, nodes: positioned, edges: nextEdges },
+      '已改为串行交接，后一步现在可以看到前一步的完整输出',
+    );
+  };
+
+  const handleApplyStarterPattern = async (pattern: 'chain' | 'blind_judge' | 'debate') => {
+    const wf = workflowRef.current;
+    const { a, b, c } = pickModelIdsForStarter();
+    const inputNode: WorkflowNodeConfig = {
+      id: 'user_requirement',
+      title: '任务输入',
+      subtitle: '输入任务目标、规则与上下文',
+      lane: 'human',
+      kind: 'human_input',
+      providerId: 'human',
+      enabled: true,
+      dependsOn: [],
+      position: { x: 0, y: 0 },
+    };
+    let nodes: WorkflowNodeConfig[];
+    let desc = '';
+    if (pattern === 'chain') {
+      desc = '串行接力：A 出初稿 → B 审改优化 → 人工拍板';
+      nodes = [
+        inputNode,
+        {
+          id: 'step_draft',
+          title: '主笔初稿',
+          subtitle: '根据任务输出完整初版方案或内容',
+          lane: 'claude',
+          kind: 'llm',
+          providerId: a,
+          enabled: true,
+          dependsOn: ['user_requirement'],
+          position: { x: 0, y: 1 },
+          promptTemplate: '请围绕以下任务完成完整初稿（当前模型：{{providerName}}）：\n\n【任务】\n{{requirement}}',
+        },
+        {
+          id: 'step_refine',
+          title: '接力审改',
+          subtitle: '基于主笔初稿挑错、补漏并输出精修版',
+          lane: 'gemini',
+          kind: 'llm',
+          providerId: b,
+          enabled: true,
+          dependsOn: ['step_draft'],
+          position: { x: 0, y: 2 },
+          promptTemplate: '请审阅上一步初稿，指出问题并直接给出改进后的最终版本（当前模型：{{providerName}}）：\n\n【任务】\n{{requirement}}\n\n【上一步初稿】\n{{previousOutput}}',
+        },
+        {
+          id: 'user_approve',
+          title: '人工拍板',
+          subtitle: '确认定稿或给出修改意见打回',
+          lane: 'human',
+          kind: 'human_gate',
+          providerId: 'human',
+          enabled: true,
+          dependsOn: ['step_refine'],
+          position: { x: 0, y: 3 },
+        },
+      ];
+    } else if (pattern === 'blind_judge') {
+      desc = '并行盲跑 + 汇总裁判：A、B 互不可见各自作答 → 裁判汇总/判分';
+      nodes = [
+        inputNode,
+        {
+          id: 'player_a',
+          title: '选手 / 视角 A',
+          subtitle: '独立完成本方出招或方案（不看对方）',
+          lane: 'claude',
+          kind: 'llm',
+          providerId: a,
+          enabled: true,
+          dependsOn: ['user_requirement'],
+          position: { x: 0, y: 1 },
+          promptTemplate: '你是独立参与方 A（当前模型：{{providerName}}）。请只输出你的本方方案 / 出招序列，不要替对手出招，也不要提前替裁判算总分。\n\n【任务与规则】\n{{requirement}}',
+        },
+        {
+          id: 'player_b',
+          title: '选手 / 视角 B',
+          subtitle: '并行独立完成本方出招或方案（不看对方）',
+          lane: 'gemini',
+          kind: 'llm',
+          providerId: b,
+          enabled: true,
+          dependsOn: ['user_requirement'],
+          position: { x: 1, y: 1 },
+          promptTemplate: '你是独立参与方 B（当前模型：{{providerName}}）。请只输出你的本方方案 / 出招序列，不要替对手出招，也不要提前替裁判算总分。\n\n【任务与规则】\n{{requirement}}',
+        },
+        {
+          id: 'judge_final',
+          title: '裁判汇总与判分',
+          subtitle: '收齐 A、B 两路盲跑输出，统一对比 / 判分',
+          lane: 'release',
+          kind: 'consensus',
+          providerId: c,
+          enabled: true,
+          dependsOn: ['player_a', 'player_b'],
+          position: { x: 0, y: 2 },
+          promptTemplate: '你是唯一裁判与汇总者（当前模型：{{providerName}}）。请严格把下方 A、B 两路独立输出逐项配对对比或计分，给出清晰表格与最终结论。\n\n【原始任务】\n{{requirement}}\n\n【A、B 两路输出】\n{{previousOutput}}',
+        },
+      ];
+    } else {
+      desc = '双模型多轮对抗：A、B 轮流看到对方上一轮发言进行博弈';
+      nodes = [
+        inputNode,
+        {
+          id: 'dual_debate',
+          title: '双模型多轮博弈 / 辩论',
+          subtitle: 'A 与 B 交替看到对方上一轮内容，展开 2 轮交锋',
+          lane: 'claude',
+          kind: 'debate',
+          providerId: a,
+          fixProviderId: b,
+          maxRounds: 2,
+          enabled: true,
+          dependsOn: ['user_requirement'],
+          position: { x: 0, y: 1 },
+        },
+        {
+          id: 'final_summary',
+          title: '终局裁决与收束',
+          subtitle: '复盘多轮交锋记录并给出最终结论',
+          lane: 'release',
+          kind: 'consensus',
+          providerId: c,
+          enabled: true,
+          dependsOn: ['dual_debate'],
+          position: { x: 0, y: 2 },
+          promptTemplate: '请复盘上方双模型多轮交锋记录，提炼关键共识、分歧与最终建议（当前模型：{{providerName}}）：\n\n【任务】\n{{requirement}}\n\n【交锋记录】\n{{previousOutput}}',
+        },
+      ];
+    }
+    const layout = computeAutoLayout(nodes);
+    const positioned = nodes.map((n) => ({ ...n, position: layout[n.id] }));
+    const edges = buildEdgesFromNodes(positioned);
+    await onSaveWorkflow(
+      { ...wf, description: desc, nodes: positioned, edges },
+      `已套用「${pattern === 'chain' ? '串行接力' : pattern === 'blind_judge' ? '并行盲跑 + 裁判' : '双模型多轮对抗'}」结构`,
+    );
+  };
 
   return (
     <section className={`claude-canvas-pane ${isFullscreen ? 'is-fullscreen' : ''}`}>
@@ -1179,6 +1515,19 @@ const InnerWorkflowCanvas: React.FC<WorkflowTemplateCanvasProps> = ({
               </option>
             ))}
           </select>
+
+          {onCreateBlankCanvas && (
+            <button
+              type="button"
+              className="btn btn-ink btn-sm"
+              style={{ height: 26, padding: '0 8px', fontSize: 11.5, flexShrink: 0 }}
+              title="新建一个空白自定义画布，从零添加节点与连线"
+              onClick={() => void onCreateBlankCanvas()}
+            >
+              <Plus size={12} />
+              <span>新建画布</span>
+            </button>
+          )}
 
           <button
             type="button"
@@ -1364,7 +1713,122 @@ const InnerWorkflowCanvas: React.FC<WorkflowTemplateCanvasProps> = ({
               <span>自动排布</span>
             </button>
 
+            {onAutoAssignModels && (
+              <button
+                type="button"
+                className="cc-tool-btn"
+                onClick={() => void onAutoAssignModels()}
+                title="一键把当前在线成员智能分配到各个 AI 节点"
+              >
+                <Sparkles size={12} />
+                <span>分配模型</span>
+              </button>
+            )}
+
+            <button
+              type="button"
+              className={`cc-tool-btn ${showUsageGuide ? 'active' : ''}`}
+              title="30 秒看懂串行 / 并行盲跑 / 双模型对抗三种画布用法"
+              onClick={() => setShowUsageGuide((v) => !v)}
+            >
+              <HelpCircle size={12} />
+              <span>用法</span>
+            </button>
+
+            {onGenerateWorkflow && (
+              <button
+                type="button"
+                className={`cc-tool-btn ${showAiBar ? 'active' : ''}`}
+                onClick={() => setShowAiBar((v) => !v)}
+                title="一句话让 AI 生成或修改当前画布工作流"
+              >
+                <Sparkles size={12} />
+                <span>AI 生成</span>
+              </button>
+            )}
+
+            <button
+              type="button"
+              className="cc-tool-btn"
+              title="一键复制当前模板为可编辑副本"
+              onClick={() => void onSaveAsTemplate(`${workflow.name} 副本`, workflow.description || '')}
+            >
+              <Copy size={12} />
+              <span>复制</span>
+            </button>
+
+            <button
+              type="button"
+              className="cc-tool-btn"
+              title="导出当前工作流模板 JSON"
+              onClick={() => {
+                const blob = new Blob([JSON.stringify(workflow, null, 2)], {
+                  type: 'application/json;charset=utf-8',
+                });
+                const url = URL.createObjectURL(blob);
+                const a = document.createElement('a');
+                a.href = url;
+                a.download = `${workflow.id || 'workflow'}.json`;
+                a.click();
+                URL.revokeObjectURL(url);
+              }}
+            >
+              <Download size={12} />
+              <span>导出</span>
+            </button>
+
+            <input
+              ref={jsonImportRef}
+              type="file"
+              accept=".json"
+              style={{ display: 'none' }}
+              onChange={async (e) => {
+                const file = e.target.files?.[0];
+                e.target.value = '';
+                if (!file) return;
+                try {
+                  const parsed = JSON.parse(await file.text()) as WorkflowDefinition & {
+                    workflow?: WorkflowDefinition;
+                  };
+                  const candidate = parsed.workflow?.nodes ? parsed.workflow : parsed;
+                  if (!candidate || !Array.isArray(candidate.nodes) || candidate.nodes.length === 0) {
+                    return;
+                  }
+                  const imported: WorkflowDefinition = {
+                    ...candidate,
+                    id: `wf_imp_${Date.now().toString(36)}`,
+                    name: candidate.name || file.name.replace(/\.json$/i, ''),
+                    edges: Array.isArray(candidate.edges) ? candidate.edges : [],
+                  };
+                  await onSaveWorkflow(imported, `已导入模板「${imported.name}」`);
+                } catch {
+                  // ignore malformed json
+                }
+              }}
+            />
+            <button
+              type="button"
+              className="cc-tool-btn"
+              title="从本地 JSON 文件导入工作流模板"
+              onClick={() => jsonImportRef.current?.click()}
+            >
+              <Upload size={12} />
+              <span>导入</span>
+            </button>
+
             <div style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: 6 }}>
+              {isWorkflowRunning && onAbortWorkflow && (
+                <button
+                  type="button"
+                  className="btn btn-sm"
+                  style={{ borderColor: '#dc2626', color: '#dc2626' }}
+                  title="停止当前画布工作流执行"
+                  onClick={onAbortWorkflow}
+                >
+                  <Square size={10} />
+                  <span>停止</span>
+                </button>
+              )}
               {isWaitingApproval && (
                 <button
                   type="button"
@@ -1388,10 +1852,118 @@ const InnerWorkflowCanvas: React.FC<WorkflowTemplateCanvasProps> = ({
                 }}
               >
                 <Play size={11} />
-                <span>运行此画布</span>
+                <span>{isWorkflowRunning ? '重新运行' : '运行此画布'}</span>
               </button>
             </div>
           </div>
+
+          {showAiBar && onGenerateWorkflow && (
+            <div className="cc-quick-run-bar">
+              {onChangeAiGeneratorId && (
+                <select
+                  className="input wf-ai-gen-select"
+                  title="选择负责设计工作流的 AI 模型或成员"
+                  value={aiGeneratorId}
+                  disabled={aiGenerating}
+                  onChange={(e) => onChangeAiGeneratorId(e.target.value)}
+                >
+                  <option value="auto">✨ 自动选择 AI</option>
+                  {aiGeneratorOptions.some((o) => o.group === 'agent') && (
+                    <optgroup label="在线成员（实时调用）">
+                      {aiGeneratorOptions
+                        .filter((o) => o.group === 'agent')
+                        .map((o) => (
+                          <option key={o.id} value={o.id}>
+                            {o.label}
+                          </option>
+                        ))}
+                    </optgroup>
+                  )}
+                  {aiGeneratorOptions.some((o) => o.group === 'api') && (
+                    <optgroup label="模型池 API">
+                      {aiGeneratorOptions
+                        .filter((o) => o.group === 'api')
+                        .map((o) => (
+                          <option key={o.id} value={o.id}>
+                            {o.label}
+                          </option>
+                        ))}
+                    </optgroup>
+                  )}
+                  <option value="local">⚡ 本地规则秒生（0 消耗）</option>
+                </select>
+              )}
+              <input
+                className="input"
+                style={{ flex: 1, padding: '6px 10px', fontSize: 12.5 }}
+                placeholder="一句话描述想要的工作流，如：生成3视角产品评审流并加人工拍板；或在当前流程加一步安全审查..."
+                value={aiPromptText}
+                autoFocus
+                disabled={aiGenerating}
+                onChange={(e) => setAiPromptText(e.target.value)}
+                onKeyDown={async (e) => {
+                  if (e.key === 'Enter' && aiPromptText.trim() && !aiGenerating) {
+                    setAiGenerating(true);
+                    try {
+                      await onGenerateWorkflow(aiPromptText.trim(), aiGeneratorId);
+                      setAiPromptText('');
+                      setShowAiBar(false);
+                    } finally {
+                      setAiGenerating(false);
+                    }
+                  } else if (e.key === 'Escape') {
+                    setShowAiBar(false);
+                  }
+                }}
+              />
+              {aiGenerating ? (
+                <button
+                  type="button"
+                  className="btn btn-sm"
+                  title="若成员端弹出了确认框，可切去点允许，或点此立即取消等待"
+                  onClick={() => {
+                    onCancelGenerateWorkflow?.();
+                    setAiGenerating(false);
+                  }}
+                >
+                  <Loader2 size={12} className="spin" />
+                  取消等待
+                </button>
+              ) : (
+                <button
+                  type="button"
+                  className="btn btn-ink btn-sm"
+                  disabled={!aiPromptText.trim()}
+                  onClick={async () => {
+                    setAiGenerating(true);
+                    try {
+                      await onGenerateWorkflow(aiPromptText.trim(), aiGeneratorId);
+                      setAiPromptText('');
+                      setShowAiBar(false);
+                    } finally {
+                      setAiGenerating(false);
+                    }
+                  }}
+                >
+                  <Sparkles size={12} />
+                  生成并应用
+                </button>
+              )}
+              <button
+                type="button"
+                className="mini-icon-btn"
+                onClick={() => {
+                  if (aiGenerating) {
+                    onCancelGenerateWorkflow?.();
+                    setAiGenerating(false);
+                  }
+                  setShowAiBar(false);
+                }}
+              >
+                <X size={13} />
+              </button>
+            </div>
+          )}
 
           {showQuickRunPrompt && (
             <div className="cc-quick-run-bar">
@@ -1417,7 +1989,7 @@ const InnerWorkflowCanvas: React.FC<WorkflowTemplateCanvasProps> = ({
                 className="btn btn-ink btn-sm"
                 disabled={!quickRunText.trim()}
                 onClick={() => {
-                  onRunWorkflow(quickRunText.trim());
+                  onRunWorkflow(quickRunText.trim(), false);
                   setQuickRunText('');
                   setShowQuickRunPrompt(false);
                 }}
@@ -1426,11 +1998,228 @@ const InnerWorkflowCanvas: React.FC<WorkflowTemplateCanvasProps> = ({
               </button>
               <button
                 type="button"
+                className="btn btn-sm"
+                disabled={!quickRunText.trim()}
+                title="仅演练画布节点流转，不调用真实模型、不消耗额度"
+                onClick={() => {
+                  onRunWorkflow(quickRunText.trim(), true);
+                  setQuickRunText('');
+                  setShowQuickRunPrompt(false);
+                }}
+              >
+                演练
+              </button>
+              <button
+                type="button"
                 className="mini-icon-btn"
                 onClick={() => setShowQuickRunPrompt(false)}
               >
                 <X size={13} />
               </button>
+            </div>
+          )}
+
+          {/* Optional Compact Usage Cheat Sheet */}
+          {showUsageGuide && (
+            <div className="cc-usage-guide">
+              <div className="cc-usage-guide-head">
+                <strong>30 秒看懂画布连线规则（新手必看）</strong>
+                <button
+                  type="button"
+                  className="mini-icon-btn"
+                  onClick={() => setShowUsageGuide(false)}
+                >
+                  <X size={13} />
+                </button>
+              </div>
+              <ul>
+                <li>
+                  <strong>串行连线（A → B）</strong>：B 会自动拿到 A 的完整输出，适合「初稿 → 审改 → 拍板」。
+                </li>
+                <li>
+                  <strong>并行分支（A ‖ B）</strong>：A 与 B 同时跑且<strong>互相看不见对方输出</strong>（天然防偷看）；若想比对或判分，记得在下游接一个<strong>「汇总 / 裁判」节点</strong>把两路合起来。
+                </li>
+                <li>
+                  <strong>双模型对抗（<code>对抗/辩论</code> 节点）</strong>：想让两家轮流看到对方上一手并直接交锋，用对抗节点一步搞定。
+                </li>
+                <li>
+                  <strong>分工小贴士</strong>：点击任意节点即可在右侧修改它的「提示词模板」（明确它扮演选手 A / 选手 B / 裁判）与执行模型。
+                </li>
+              </ul>
+              <div className="cc-advice-actions">
+                <span className="cc-advice-label">一键套用结构：</span>
+                <button type="button" className="cc-tool-btn" onClick={() => void handleApplyStarterPattern('chain')}>
+                  串行接力
+                </button>
+                <button type="button" className="cc-tool-btn" onClick={() => void handleApplyStarterPattern('blind_judge')}>
+                  并行盲跑 + 裁判
+                </button>
+                <button type="button" className="cc-tool-btn" onClick={() => void handleApplyStarterPattern('debate')}>
+                  双模型对抗
+                </button>
+              </div>
+            </div>
+          )}
+
+          {/* Smart Topology Advisor (catches unmerged blind parallel branches OR bare starter canvas) */}
+          {!isWorkflowRunning && unmergedParallelLeaves.length >= 2 && (
+            <div className="cc-advice-bar is-warn">
+              <div className="cc-advice-text">
+                <strong>提示：</strong>
+                <span>
+                  当前有 {unmergedParallelLeaves.length} 个并行节点互不可见且下游未汇总，直接运行会各自独立作答（不会互相对战或合并）。
+                </span>
+              </div>
+              <div className="cc-advice-actions">
+                <button
+                  type="button"
+                  className="btn btn-sm btn-ink"
+                  onClick={() => void handleAddMergeJudgeNode()}
+                >
+                  + 一键补下游汇总 / 裁判
+                </button>
+                <button
+                  type="button"
+                  className="btn btn-sm"
+                  onClick={() => void handleChainParallelLeaves()}
+                >
+                  改为串行交接
+                </button>
+              </div>
+            </div>
+          )}
+
+          {!isWorkflowRunning &&
+            unmergedParallelLeaves.length < 2 &&
+            workflow.nodes.length <= 2 &&
+            !showUsageGuide && (
+              <div className="cc-advice-bar is-guide">
+                <div className="cc-advice-text">
+                  <strong>快速搭画布：</strong>
+                  <span>选一种协作结构起步，或点上方「AI 生成」一句话自动搭好分工：</span>
+                </div>
+                <div className="cc-advice-actions">
+                  <button
+                    type="button"
+                    className="btn btn-sm"
+                    onClick={() => void handleApplyStarterPattern('chain')}
+                  >
+                    串行接力
+                  </button>
+                  <button
+                    type="button"
+                    className="btn btn-sm btn-ink"
+                    onClick={() => void handleApplyStarterPattern('blind_judge')}
+                  >
+                    并行盲跑 + 裁判
+                  </button>
+                  <button
+                    type="button"
+                    className="btn btn-sm"
+                    onClick={() => void handleApplyStarterPattern('debate')}
+                  >
+                    双模型对抗
+                  </button>
+                </div>
+              </div>
+            )}
+
+          {/* Live Workflow Run Progress HUD (mirrors chatroom waiting tray right inside canvas) */}
+          {showProgressStrip && (
+            <div
+              className={`cc-run-progress-bar ${
+                isWorkflowRunning
+                  ? 'is-running'
+                  : isWaitingApproval
+                    ? 'is-waiting'
+                    : activeRunNodes.some((x) => x.state.status === 'failed')
+                      ? 'is-failed'
+                      : 'is-done'
+              }`}
+              role="status"
+              aria-live="polite"
+            >
+              <div className="cc-rp-top">
+                <div className="cc-rp-summary">
+                  <span className="cc-rp-dot" />
+                  <strong>
+                    {isWorkflowRunning
+                      ? `画布运行中 · ${activeRunNodes.filter((x) => x.state.status === 'running').length} 个节点执行中`
+                      : isWaitingApproval
+                        ? '画布已暂停 · 等待人工拍板'
+                        : activeRunNodes.some((x) => x.state.status === 'failed')
+                          ? '画布执行有节点失败'
+                          : '画布已全部完成'}
+                  </strong>
+                  <span className="cc-rp-count">
+                    {progressDone}/{progressTotal} 步 ({progressPct}%)
+                  </span>
+                </div>
+
+                <div className="cc-rp-track-wrap">
+                  <div className="cc-rp-track">
+                    <div
+                      className="cc-rp-fill"
+                      style={{ width: `${Math.max(progressPct, isWorkflowRunning ? 8 : 0)}%` }}
+                    />
+                  </div>
+                  {stageArtifacts.length > 0 && (
+                    <button
+                      type="button"
+                      className="cc-tool-btn"
+                      style={{ padding: '2px 7px', fontSize: 11 }}
+                      onClick={() => setActiveTab('artifacts')}
+                    >
+                      <FileText size={11} />
+                      <span>看产出 ({stageArtifacts.length})</span>
+                    </button>
+                  )}
+                </div>
+              </div>
+
+              {activeRunNodes.length > 0 && (
+                <div className="cc-rp-nodes">
+                  {activeRunNodes.map(({ node, state }) => {
+                    const sec =
+                      state.status === 'running' && state.startedAt
+                        ? Math.max(0, Math.floor((nowTick - new Date(state.startedAt).getTime()) / 1000))
+                        : state.durationMs !== undefined
+                          ? Math.round(state.durationMs / 1000)
+                          : 0;
+                    const lastLine =
+                      state.status === 'failed'
+                        ? state.error || '执行失败'
+                        : state.logs && state.logs.length > 0
+                          ? state.logs[state.logs.length - 1]
+                          : state.status === 'waiting_approval'
+                            ? '等待你点击「去拍板」确认'
+                            : '已派单，等待模型响应…';
+                    return (
+                      <button
+                        key={node.id}
+                        type="button"
+                        className={`cc-rp-node-chip status-${state.status}`}
+                        title={`点击查看「${node.title}」完整实时日志`}
+                        onClick={() => setSelectedNodeId(node.id)}
+                      >
+                        {state.status === 'running' ? (
+                          <Loader2 size={11} className="spin" />
+                        ) : state.status === 'waiting_approval' ? (
+                          <Hand size={11} />
+                        ) : (
+                          <AlertCircle size={11} />
+                        )}
+                        <span className="cc-rp-node-title">{node.title}</span>
+                        {state.providerUsed && (
+                          <span className="cc-rp-node-model">{state.providerUsed}</span>
+                        )}
+                        <span className="cc-rp-node-log">{lastLine}</span>
+                        <span className="cc-rp-node-time">{sec}s</span>
+                      </button>
+                    );
+                  })}
+                </div>
+              )}
             </div>
           )}
 
@@ -1510,6 +2299,58 @@ const InnerWorkflowCanvas: React.FC<WorkflowTemplateCanvasProps> = ({
                 </div>
 
                 <div className="cc-inspector-body">
+                  {selectedNodeState && selectedNodeState.status !== 'idle' && (
+                    <div className={`cc-inspector-live status-${selectedNodeState.status}`}>
+                      <div className="cc-inspector-live-head">
+                        <span>
+                          {selectedNodeState.status === 'running'
+                            ? `运行中 · ${
+                                selectedNodeState.startedAt
+                                  ? Math.max(
+                                      0,
+                                      Math.floor(
+                                        (nowTick - new Date(selectedNodeState.startedAt).getTime()) /
+                                          1000,
+                                      ),
+                                    )
+                                  : 0
+                              }s`
+                            : selectedNodeState.status === 'completed'
+                              ? `已完成${
+                                  selectedNodeState.durationMs !== undefined
+                                    ? ` · ${(selectedNodeState.durationMs / 1000).toFixed(1)}s`
+                                    : ''
+                                }`
+                              : selectedNodeState.status === 'waiting_approval'
+                                ? '等待人工拍板'
+                                : '执行失败'}
+                          {selectedNodeState.providerUsed ? `（${selectedNodeState.providerUsed}）` : ''}
+                        </span>
+                        {selectedNodeState.output?.trim() && (
+                          <button
+                            type="button"
+                            className="cc-tool-btn"
+                            style={{ padding: '1px 6px', fontSize: 10.5 }}
+                            onClick={() => {
+                              setSelectedArtifactId(selectedNode.id);
+                              setActiveTab('artifacts');
+                            }}
+                          >
+                            查看产出
+                          </button>
+                        )}
+                      </div>
+                      {selectedNodeState.error && (
+                        <div className="cc-inspector-live-err">{selectedNodeState.error}</div>
+                      )}
+                      {selectedNodeState.logs.length > 0 && (
+                        <pre className="cc-inspector-live-logs">
+                          {selectedNodeState.logs.slice(-12).join('\n')}
+                        </pre>
+                      )}
+                    </div>
+                  )}
+
                   <div className="cc-field">
                     <label>节点标题</label>
                     <input

@@ -56,14 +56,18 @@ export function loadWorkflowTemplates(): WorkflowPresetTemplate[] {
   for (const b of BUILTIN_WORKFLOW_TEMPLATES) {
     const existing = byId.get(b.id);
     if (existing) {
-      merged.push({ ...existing, builtin: true });
+      merged.push({
+        ...existing,
+        category: existing.category || b.category,
+        builtin: true,
+      });
       byId.delete(b.id);
     } else {
       merged.push(structuredClone(b));
     }
   }
   for (const custom of byId.values()) {
-    merged.push(custom);
+    merged.push({ ...custom, category: custom.category || 'custom' });
   }
   if (!fs.existsSync(workflowTemplatesFile)) {
     saveWorkflowTemplates(merged);
@@ -310,7 +314,35 @@ export function loadProviders(): ProviderConfig[] {
     const raw = fs.readFileSync(providersFile, 'utf8');
     const parsed = JSON.parse(raw) as ProviderConfig[];
     if (Array.isArray(parsed) && parsed.length > 0) {
-      return parsed;
+      let migrated = false;
+      const agyDefault = DEFAULT_PROVIDERS.find((p) => p.id === 'gemini');
+      const next = parsed.map((p) => {
+        if (
+          agyDefault &&
+          p.id === 'gemini' &&
+          (!p.connectionType || p.connectionType === 'cli') &&
+          p.command === 'gemini' &&
+          (p.installCmd || '').includes('@google/gemini-cli')
+        ) {
+          migrated = true;
+          return {
+            ...p,
+            name: agyDefault.name,
+            subscriptionHint: agyDefault.subscriptionHint,
+            command: agyDefault.command,
+            args: [...agyDefault.args],
+            modelFlag: agyDefault.modelFlag,
+            installCmd: agyDefault.installCmd,
+            loginCmd: agyDefault.loginCmd,
+            docsHint: agyDefault.docsHint,
+          };
+        }
+        return p;
+      });
+      if (migrated) {
+        saveProviders(next);
+      }
+      return next;
     }
   } catch {
     // Fallback to defaults if corrupted

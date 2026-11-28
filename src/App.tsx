@@ -2,6 +2,7 @@ import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import {
   AlertTriangle,
   ArrowUp,
+  AtSign,
   Blocks,
   BookOpen,
   Brain,
@@ -25,6 +26,7 @@ import {
   Pencil,
   Play,
   Plus,
+  Power,
   Repeat,
   RotateCcw,
   Search,
@@ -46,7 +48,6 @@ import type {
   ChatAttachment,
   ChatMessage,
   ConnectedAgent,
-  ExecutionMode,
   MemberQuotaConfig,
   MemberUsageRecord,
   ProviderConfig,
@@ -188,7 +189,6 @@ export const App: React.FC = () => {
   const [activeRun, setActiveRun] = useState<WorkflowRun | null>(null);
 
   const [repoPath, setRepoPath] = useState('D:\\video');
-  const [executionMode, setExecutionMode] = useState<ExecutionMode>('mock');
   const [selectedTargets, setSelectedTargets] = useState<string[]>([]);
   const [input, setInput] = useState('');
   const [pendingAttachments, setPendingAttachments] = useState<ChatAttachment[]>([]);
@@ -199,13 +199,25 @@ export const App: React.FC = () => {
   const [slashQuery, setSlashQuery] = useState<string | null>(null);
   const [slashIndex, setSlashIndex] = useState(0);
 
-  const [showWorkspace, setShowWorkspace] = useState(
-    () => typeof window !== 'undefined' && window.innerWidth >= 1080,
-  );
+  const initialRightPane = (() => {
+    try {
+      const saved = localStorage.getItem('ag_right_pane');
+      if (saved === 'workspace' || saved === 'canvas' || saved === 'drawer' || saved === 'none') {
+        return saved;
+      }
+    } catch {}
+    return typeof window !== 'undefined' && window.innerWidth >= 1080 ? 'drawer' : 'none';
+  })();
+  const [showWorkspace, setShowWorkspace] = useState(initialRightPane === 'drawer');
   const [workspaceTab, setWorkspaceTab] = useState<WorkspaceTab>('progress');
-  const [showCanvas, setShowCanvas] = useState(false);
-  const [showProjectWorkspace, setShowProjectWorkspace] = useState(false);
-  const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
+  const [showCanvas, setShowCanvas] = useState(initialRightPane === 'canvas');
+  const [showProjectWorkspace, setShowProjectWorkspace] = useState(initialRightPane === 'workspace');
+  const [sidebarCollapsed, setSidebarCollapsed] = useState(
+    () =>
+      typeof window !== 'undefined' &&
+      window.innerWidth < 1180 &&
+      (initialRightPane === 'workspace' || initialRightPane === 'canvas'),
+  );
   const [sidebarWidthPx, setSidebarWidthPx] = useState<number>(() => {
     try {
       const saved = Number(localStorage.getItem('ag_sidebar_w'));
@@ -246,6 +258,18 @@ export const App: React.FC = () => {
   const [showThinkingMenu, setShowThinkingMenu] = useState(false);
   const [showQuickExtMenu, setShowQuickExtMenu] = useState(false);
   const [showWorkflowPicker, setShowWorkflowPicker] = useState(false);
+  const [wfCategoryFilter, setWfCategoryFilter] = useState<'all' | 'dev' | 'review' | 'brainstorm' | 'writing' | 'custom'>('all');
+  const [showWfAiGen, setShowWfAiGen] = useState(false);
+  const [wfAiPrompt, setWfAiPrompt] = useState('');
+  const [wfAiBusy, setWfAiBusy] = useState(false);
+  const wfAiAbortRef = useRef<AbortController | null>(null);
+  const [wfAiGeneratorId, setWfAiGeneratorId] = useState<string>(() => {
+    try {
+      return localStorage.getItem('wf_ai_generator_id') || 'auto';
+    } catch {
+      return 'auto';
+    }
+  });
   const [attachMenuMode, setAttachMenuMode] = useState<'closed' | 'menu' | 'workspace' | 'snippet'>('closed');
   const [wsFileQuery, setWsFileQuery] = useState('');
   const [wsFiles, setWsFiles] = useState<Array<{ relPath: string; absPath: string; name: string; size: number; ext: string }>>([]);
@@ -256,8 +280,27 @@ export const App: React.FC = () => {
   const [isDraggingFile, setIsDraggingFile] = useState(false);
   const [runningQuickPluginId, setRunningQuickPluginId] = useState('');
   const [editingMember, setEditingMember] = useState<EditableMember | null>(null);
+  const [expandedMemberId, setExpandedMemberId] = useState<string | null>(null);
+  const [memberContextMenu, setMemberContextMenu] = useState<{
+    x: number;
+    y: number;
+    member: {
+      id: string;
+      name: string;
+      kind: 'agent' | 'provider';
+      presence: MemberPresence;
+      subtitle: string;
+      avatar?: string;
+      color: string;
+      listening: boolean;
+    };
+    confirmDelete?: boolean;
+  } | null>(null);
   const [copiedId, setCopiedId] = useState('');
   const [expandedWakeIds, setExpandedWakeIds] = useState<Record<string, boolean>>({});
+  const [manualReplyMsgId, setManualReplyMsgId] = useState<string | null>(null);
+  const [manualReplyText, setManualReplyText] = useState('');
+  const [submittingManualReply, setSubmittingManualReply] = useState(false);
   const [wakeNowTick, setWakeNowTick] = useState(() => Date.now());
   const [autoRelayRounds, setAutoRelayRounds] = useState<number>(() => {
     const raw = localStorage.getItem('ag_auto_relay_rounds');
@@ -288,6 +331,22 @@ export const App: React.FC = () => {
   }, [input]);
 
   useEffect(() => {
+    if (!memberContextMenu) return;
+    const close = () => setMemberContextMenu(null);
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') setMemberContextMenu(null);
+    };
+    window.addEventListener('click', close);
+    window.addEventListener('scroll', close, true);
+    window.addEventListener('keydown', onKey);
+    return () => {
+      window.removeEventListener('click', close);
+      window.removeEventListener('scroll', close, true);
+      window.removeEventListener('keydown', onKey);
+    };
+  }, [memberContextMenu]);
+
+  useEffect(() => {
     document.documentElement.setAttribute('data-theme', theme);
     localStorage.setItem('ag_chat_theme', theme);
   }, [theme]);
@@ -300,6 +359,19 @@ export const App: React.FC = () => {
     localStorage.setItem('ag_auto_relay_rounds', String(autoRelayRounds));
   }, [autoRelayRounds]);
 
+  useEffect(() => {
+    try {
+      const pane = showProjectWorkspace
+        ? 'workspace'
+        : showCanvas
+          ? 'canvas'
+          : showWorkspace
+            ? 'drawer'
+            : 'none';
+      localStorage.setItem('ag_right_pane', pane);
+    } catch {}
+  }, [showProjectWorkspace, showCanvas, showWorkspace]);
+
   const flash = useCallback((msg: string) => {
     setToast(msg);
     setTimeout(() => setToast((cur) => (cur === msg ? '' : cur)), 2600);
@@ -309,7 +381,7 @@ export const App: React.FC = () => {
     const { run } = await api.createRun({
       title: '新协作会话',
       repoPath: cwd,
-      executionMode: 'mock',
+      executionMode: 'real',
       startWorkflow: false,
     });
     setRuns([run]);
@@ -363,7 +435,6 @@ export const App: React.FC = () => {
       setRuns(runsRes.runs);
       const first = runsRes.runs[0];
       setActiveRun(first);
-      setExecutionMode(first.executionMode);
       if (first.repoPath) setRepoPath(first.repoPath);
     } else {
       await ensureInitialRoom(defaultCwd);
@@ -416,10 +487,10 @@ export const App: React.FC = () => {
   }, [doneAssistantCount, refreshMemberUsage]);
 
   useEffect(() => {
-    if (editingMember) {
+    if (editingMember || expandedMemberId) {
       void refreshMemberUsage();
     }
-  }, [editingMember?.id, refreshMemberUsage]);
+  }, [editingMember?.id, expandedMemberId, refreshMemberUsage]);
 
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth', block: 'end' });
@@ -860,7 +931,7 @@ export const App: React.FC = () => {
       if (!roomId) {
         const { run } = await api.createRun({
           repoPath,
-          executionMode,
+          executionMode: 'real',
           startWorkflow: false,
         });
         setRuns((prev) => [run, ...prev]);
@@ -919,7 +990,7 @@ export const App: React.FC = () => {
       if (!roomId) {
         const { run } = await api.createRun({
           repoPath,
-          executionMode,
+          executionMode: 'real',
           startWorkflow: false,
         });
         setRuns((prev) => [run, ...prev]);
@@ -949,7 +1020,7 @@ export const App: React.FC = () => {
       if (!roomId) {
         const { run } = await api.createRun({
           repoPath,
-          executionMode,
+          executionMode: 'real',
           startWorkflow: false,
         });
         setRuns((prev) => [run, ...prev]);
@@ -1097,7 +1168,7 @@ export const App: React.FC = () => {
     const { run } = await api.createRun({
       title: '新协作会话',
       repoPath,
-      executionMode,
+      executionMode: 'real',
       startWorkflow: false,
     });
     setRuns((prev) => [run, ...prev]);
@@ -1136,7 +1207,34 @@ export const App: React.FC = () => {
   const handleDeleteAgent = async (agentId: string) => {
     await api.deleteAgent(agentId);
     setSelectedTargets((prev) => prev.filter((id) => id !== agentId));
+    setExpandedMemberId((prev) => (prev === agentId ? null : prev));
     flash('已移出该接入成员');
+  };
+
+  const handleRemoveMember = async (target: {
+    id: string;
+    name: string;
+    kind: 'agent' | 'provider';
+  }) => {
+    if (target.kind === 'agent') {
+      await api.deleteAgent(target.id);
+      setConnectedAgents((prev) => prev.filter((a) => a.id !== target.id));
+      setSelectedTargets((prev) => prev.filter((id) => id !== target.id));
+      setExpandedMemberId((prev) => (prev === target.id ? null : prev));
+      setEditingMember((prev) => (prev?.id === target.id ? null : prev));
+      flash(`已移除成员「${target.name}」`);
+      return;
+    }
+    if (providers.length <= 1 && connectedAgents.length === 0) {
+      throw new Error('至少需要保留 1 个模型池配置');
+    }
+    const nextProviders = providers.filter((p) => p.id !== target.id);
+    const { providers: saved } = await api.saveProviders(nextProviders);
+    setProviders(saved);
+    setSelectedTargets((prev) => prev.filter((id) => id !== target.id));
+    setExpandedMemberId((prev) => (prev === target.id ? null : prev));
+    setEditingMember((prev) => (prev?.id === target.id ? null : prev));
+    flash(`已从模型池移除「${target.name}」`);
   };
 
   const stripMentionTag = (text: string, name: string): string => {
@@ -1233,7 +1331,11 @@ export const App: React.FC = () => {
     }
   };
 
-  const handleSend = async (mode: 'chat' | 'workflow', overrideContent?: string) => {
+  const handleSend = async (
+    mode: 'chat' | 'workflow',
+    overrideContent?: string,
+    dryRun = false,
+  ) => {
     const text = (overrideContent !== undefined ? overrideContent : input).trim();
     const attachmentsToSend = overrideContent !== undefined ? [] : pendingAttachments;
     if (!text && attachmentsToSend.length === 0) return;
@@ -1291,11 +1393,12 @@ export const App: React.FC = () => {
       return;
     }
 
+    const runExecMode = dryRun ? 'mock' : 'real';
     let roomId = activeRun?.id;
     if (!roomId) {
       const { run } = await api.createRun({
         repoPath,
-        executionMode,
+        executionMode: runExecMode,
         startWorkflow: false,
       });
       setRuns((prev) => [run, ...prev]);
@@ -1314,7 +1417,7 @@ export const App: React.FC = () => {
         attachments: attachmentsToSend.length > 0 ? attachmentsToSend : undefined,
         targetProviderIds: resolvedTargets,
         mode,
-        executionMode,
+        executionMode: runExecMode,
         repoPath,
         autoRelayMaxRounds: mode === 'chat' ? autoRelayRounds : 0,
       });
@@ -1377,6 +1480,117 @@ export const App: React.FC = () => {
     flash(`已切换工作流模板「${res.template.name}」`);
   };
 
+  const handleAutoAssignWorkflowModels = async () => {
+    if (!workflow) return;
+    if (activeMemberIds.length === 0) {
+      flash('当前没有在线成员可分配，请先在模型池启用或邀请外部模型');
+      return;
+    }
+    let cursor = 0;
+    const nextNodes = workflow.nodes.map((node) => {
+      if (node.enabled === false) return node;
+      if (node.kind === 'llm') {
+        const picked = activeMemberIds[cursor % activeMemberIds.length];
+        cursor += 1;
+        return { ...node, providerId: picked };
+      }
+      if (node.kind === 'review_loop') {
+        const reviewer = activeMemberIds[cursor % activeMemberIds.length];
+        cursor += 1;
+        const fixer =
+          activeMemberIds.length > 1
+            ? activeMemberIds.find((id) => id !== reviewer) || reviewer
+            : reviewer;
+        return { ...node, providerId: reviewer, fixProviderId: fixer };
+      }
+      return node;
+    });
+    await handleSaveWorkflow(
+      { ...workflow, nodes: nextNodes },
+      `已按当前 ${activeMemberIds.length} 位在线成员智能分配各步骤模型`,
+    );
+  };
+
+  const wfAiGeneratorOptions = useMemo(() => {
+    const agentOpts = onlineAgents.map((a) => ({
+      id: a.id,
+      label: `🟢 ${a.name}${a.listening ? ' · 实时监听' : ''}`,
+      group: 'agent' as const,
+    }));
+    const apiOpts = providers
+      .filter(
+        (p) =>
+          p.connectionType &&
+          p.connectionType !== 'cli' &&
+          Boolean(p.model?.trim()) &&
+          (Boolean(p.apiKey?.trim()) || /127\.0\.0\.1|localhost/i.test(p.apiBaseUrl || '')),
+      )
+      .map((p) => ({
+        id: p.id,
+        label: `⚡ ${p.shortName || p.name}（API）`,
+        group: 'api' as const,
+      }));
+    return [...agentOpts, ...apiOpts];
+  }, [onlineAgents, providers]);
+
+  const handleChangeWfAiGeneratorId = (nextId: string) => {
+    setWfAiGeneratorId(nextId);
+    try {
+      localStorage.setItem('wf_ai_generator_id', nextId);
+    } catch {
+      // ignore storage quota errors
+    }
+  };
+
+  const handleCancelWorkflowGenerate = () => {
+    if (wfAiAbortRef.current) {
+      wfAiAbortRef.current.abort();
+      wfAiAbortRef.current = null;
+    }
+    setWfAiBusy(false);
+    flash('已取消等待 AI 设计，可改选「本地规则秒生」或重新生成');
+  };
+
+  const handleGenerateWorkflowFromPrompt = async (promptText: string, overrideGeneratorId?: string) => {
+    const clean = promptText.trim();
+    if (!clean) return;
+    if (wfAiAbortRef.current) {
+      wfAiAbortRef.current.abort();
+    }
+    const ac = new AbortController();
+    wfAiAbortRef.current = ac;
+    const chosenId = overrideGeneratorId ?? wfAiGeneratorId;
+    setWfAiBusy(true);
+    try {
+      const res = await api.generateWorkflow(
+        {
+          prompt: clean,
+          currentWorkflow: workflow || undefined,
+          onlineMemberIds: activeMemberIds,
+          providerId: chosenId && chosenId !== 'auto' ? chosenId : undefined,
+          apply: true,
+        },
+        ac.signal,
+      );
+      setWorkflow(res.workflow);
+      setWfAiPrompt('');
+      setShowWfAiGen(false);
+      if (res.fallbackReason) {
+        flash(`${res.fallbackReason}：${res.workflow.name}`);
+      } else {
+        flash(`已通过「${res.generatedBy}」生成工作流：${res.workflow.name}`);
+      }
+    } catch (err) {
+      if (ac.signal.aborted) return;
+      flash(err instanceof Error ? err.message : '生成工作流失败');
+    } finally {
+      if (wfAiAbortRef.current === ac) {
+        wfAiAbortRef.current = null;
+      }
+      setWfAiBusy(false);
+    }
+  };
+
   const handleSaveAsWorkflowTemplate = async (name: string, description: string) => {
     if (!workflow) return;
     const res = await api.saveWorkflowTemplate({
@@ -1388,6 +1602,52 @@ export const App: React.FC = () => {
     setWorkflow(res.template.workflow);
     await api.applyWorkflowTemplate(res.template.id);
     flash(`已保存为模板「${res.template.name}」`);
+  };
+
+  const handleCreateBlankCanvas = async () => {
+    const customCount = workflowTemplates.filter((t) => !t.builtin).length + 1;
+    const name = `新建画布 ${customCount}`;
+    const blankWorkflow: WorkflowDefinition = {
+      id: `wf_blank_${Date.now().toString(36)}`,
+      name,
+      description: '从零开始的空白工作流画布，可自由添加节点与连线',
+      nodes: [
+        {
+          id: 'user_requirement',
+          title: '任务输入',
+          subtitle: '输入任务目标与上下文',
+          lane: 'human',
+          kind: 'human_input',
+          providerId: 'human',
+          enabled: true,
+          dependsOn: [],
+          position: { x: 0, y: 0 },
+        },
+        {
+          id: 'step_1',
+          title: '步骤 1',
+          subtitle: '双击或点击节点编辑提示词与模型',
+          lane: 'claude',
+          kind: 'llm',
+          providerId: activeMemberIds[0] || '',
+          enabled: true,
+          dependsOn: ['user_requirement'],
+          position: { x: 0, y: 1 },
+          promptTemplate: `请根据任务需求完成本步处理（当前模型：{{providerName}}）：\n\n【任务需求】\n{{requirement}}`,
+        },
+      ],
+      edges: [{ id: 'e_blank_1', source: 'user_requirement', target: 'step_1' }],
+    };
+    const res = await api.saveWorkflowTemplate({
+      name,
+      description: blankWorkflow.description,
+      workflow: blankWorkflow,
+    });
+    setWorkflowTemplates(res.templates);
+    const applied = await api.applyWorkflowTemplate(res.template.id);
+    setWorkflow(applied.workflow);
+    openWorkflowCanvas();
+    flash(`已新建空白画布「${res.template.name}」`);
   };
 
   const handleDeleteWorkflowTemplate = async (templateId: string) => {
@@ -1862,7 +2122,6 @@ export const App: React.FC = () => {
                     className={`studio-thread-item ${activeRun?.id === r.id ? 'active' : ''}`}
                     onClick={() => {
                       setActiveRun(r);
-                      setExecutionMode(r.executionMode);
                       if (r.repoPath) setRepoPath(r.repoPath);
                     }}
                   >
@@ -2010,88 +2269,234 @@ export const App: React.FC = () => {
                             : m.bridgeActive
                               ? '📁 文件桥接'
                               : '在线 · 空闲';
+                      const isExpanded = expandedMemberId === m.id;
+                      const usageRec = memberUsage[m.id];
+                      const q = usageRec?.quota;
+                      const quotaSummary = (() => {
+                        if (!q) return null;
+                        if (q.usedPercent !== undefined) {
+                          const rem = Math.max(0, Math.min(100, 100 - q.usedPercent));
+                          return {
+                            text: `剩余 ${rem.toFixed(0)}%${q.resetAtLabel ? ` · ${q.resetAtLabel}` : ''}`,
+                            usedPct: Math.min(100, Math.max(0, q.usedPercent)),
+                            remainPct: rem,
+                          };
+                        }
+                        if (q.creditRemaining !== undefined) {
+                          const unit = q.creditUnit || '积分';
+                          const remPct =
+                            q.creditTotal && q.creditTotal > 0
+                              ? Math.max(0, Math.min(100, (q.creditRemaining / q.creditTotal) * 100))
+                              : undefined;
+                          return {
+                            text: `剩余 ${q.creditRemaining.toLocaleString('en-US')} ${unit}${remPct !== undefined ? ` (${remPct.toFixed(0)}%)` : ''}`,
+                            usedPct: remPct !== undefined ? 100 - remPct : undefined,
+                            remainPct: remPct,
+                          };
+                        }
+                        if (q.callLimit && q.callLimit > 0) {
+                          const rem = Math.max(0, q.callLimit - (usageRec?.calls || 0));
+                          const remPct = Math.max(0, Math.min(100, (rem / q.callLimit) * 100));
+                          return {
+                            text: `剩余 ${rem}/${q.callLimit} 次 (${remPct.toFixed(0)}%)`,
+                            usedPct: 100 - remPct,
+                            remainPct: remPct,
+                          };
+                        }
+                        if (q.tokenLimit && q.tokenLimit > 0) {
+                          const rem = Math.max(0, q.tokenLimit - (usageRec?.totalTokens || 0));
+                          const remPct = Math.max(0, Math.min(100, (rem / q.tokenLimit) * 100));
+                          return {
+                            text: `剩余 ${formatCompactTokens(rem)} tok (${remPct.toFixed(0)}%)`,
+                            usedPct: 100 - remPct,
+                            remainPct: remPct,
+                          };
+                        }
+                        if (q.balanceLabel) {
+                          return { text: q.balanceLabel, usedPct: undefined, remainPct: undefined };
+                        }
+                        return null;
+                      })();
+
+                      const recentMemberMsgs = isExpanded
+                        ? (() => {
+                            const inCurrent = (activeRun?.messages || []).filter(
+                              (msg) => msg.role === 'assistant' && msg.senderId === m.id && msg.content?.trim(),
+                            );
+                            if (inCurrent.length > 0) return inCurrent.slice(-2).reverse();
+                            const allAcross: ChatMessage[] = [];
+                            for (const r of runs) {
+                              for (const msg of r.messages || []) {
+                                if (msg.role === 'assistant' && msg.senderId === m.id && msg.content?.trim()) {
+                                  allAcross.push(msg);
+                                }
+                              }
+                            }
+                            return allAcross.slice(-2).reverse();
+                          })()
+                        : [];
 
                       return (
-                        <div
-                          key={m.id}
-                          role="button"
-                          tabIndex={0}
-                          className={`studio-member ${active ? 'selected' : ''} ${isOffline ? 'is-offline' : ''} ${isWorking ? 'is-working' : ''}`}
-                          onClick={() => {
-                            if (isOffline) {
-                              setEditingMember({
-                                id: m.id,
-                                name: m.name,
-                                avatar: m.avatar,
-                                color: m.color,
-                                presence: m.presence,
-                                kind: m.kind,
-                                subtitle: m.subtitle,
-                              });
-                            } else {
-                              mentionMemberQuick(m.id, m.name);
-                            }
-                          }}
-                          onDoubleClick={openProfile}
-                          onKeyDown={(e) => {
-                            if (e.key === 'Enter' || e.key === ' ') {
+                        <div key={m.id} className={`studio-member-wrap ${isExpanded ? 'is-expanded' : ''}`}>
+                          <div
+                            role="button"
+                            tabIndex={0}
+                            className={`studio-member ${active ? 'selected' : ''} ${isExpanded ? 'is-expanded' : ''} ${isOffline ? 'is-offline' : ''} ${isWorking ? 'is-working' : ''}`}
+                            onClick={() => {
+                              setExpandedMemberId((prev) => (prev === m.id ? null : m.id));
+                            }}
+                            onContextMenu={(e) => {
                               e.preventDefault();
-                              if (!isOffline) mentionMemberQuick(m.id, m.name);
-                            }
-                          }}
-                          title={
-                            isOffline
-                              ? `${m.name}（离线）· 点击可恢复在线或编辑头像名称`
-                              : `${m.name}（${statusLabel}）· 点击插入 @${m.name}，点铅笔可改名/换头像`
-                          }
-                        >
-                          <MemberAvatar
-                            name={m.name}
-                            avatar={m.avatar}
-                            color={m.color}
-                            size={24}
-                            radius={7}
-                            status={isWorking ? 'busy' : isOffline ? 'off' : 'on'}
-                            onClick={openProfile}
-                            title="点击修改头像、名称或上下线状态"
-                          />
-                          <div className="studio-member-body">
-                            <span className="studio-member-name">{m.name}</span>
-                            <div className="studio-member-sub">
-                              <span className={`presence-text is-${m.presence}`}>
-                                <span className={`presence-dot ${m.presence}`} />
-                                {statusLabel}
-                              </span>
-                              {m.listening && !isWorking && (
-                                <button
-                                  type="button"
-                                  className="member-effort-tag"
-                                  style={{ cursor: 'pointer' }}
-                                  title="点击远程结束该成员的待命监听"
-                                  onClick={(e) => {
-                                    e.stopPropagation();
-                                    void api.stopAgentStandby(m.id).then(() => {
-                                      flash(`已通知「${m.name}」退出待命监听`);
-                                    });
-                                  }}
-                                >
-                                  停等
-                                </button>
+                              e.stopPropagation();
+                              const menuW = 208;
+                              const menuH = m.listening ? 236 : 204;
+                              const x = Math.max(8, Math.min(e.clientX, window.innerWidth - menuW - 8));
+                              const y = Math.max(8, Math.min(e.clientY, window.innerHeight - menuH - 8));
+                              setMemberContextMenu({
+                                x,
+                                y,
+                                member: {
+                                  id: m.id,
+                                  name: m.name,
+                                  kind: m.kind,
+                                  presence: m.presence,
+                                  subtitle: m.subtitle,
+                                  avatar: m.avatar,
+                                  color: m.color,
+                                  listening: m.listening,
+                                },
+                              });
+                            }}
+                            onKeyDown={(e) => {
+                              if (e.key === 'Enter' || e.key === ' ') {
+                                e.preventDefault();
+                                setExpandedMemberId((prev) => (prev === m.id ? null : m.id));
+                              }
+                            }}
+                            title={`${m.name}（${statusLabel}）· 单击预览 · 右键快捷操作 · 点右侧铅笔编辑详情`}
+                          >
+                            <MemberAvatar
+                              name={m.name}
+                              avatar={m.avatar}
+                              color={m.color}
+                              size={24}
+                              radius={7}
+                              status={isWorking ? 'busy' : isOffline ? 'off' : 'on'}
+                            />
+                            <div className="studio-member-body">
+                              <span className="studio-member-name">{m.name}</span>
+                              <div className="studio-member-sub">
+                                <span className={`presence-text is-${m.presence}`}>
+                                  <span className={`presence-dot ${m.presence}`} />
+                                  {statusLabel}
+                                </span>
+                                {m.listening && !isWorking && (
+                                  <button
+                                    type="button"
+                                    className="member-effort-tag"
+                                    style={{ cursor: 'pointer' }}
+                                    title="点击远程结束该成员的待命监听"
+                                    onClick={(e) => {
+                                      e.stopPropagation();
+                                      void api.stopAgentStandby(m.id).then(() => {
+                                        flash(`已通知「${m.name}」退出待命监听`);
+                                      });
+                                    }}
+                                  >
+                                    停等
+                                  </button>
+                                )}
+                                {lvl !== 'default' && !isOffline && (
+                                  <span className="member-effort-tag">{getThinkingLabel(lvl)}</span>
+                                )}
+                              </div>
+                            </div>
+                            <button
+                              type="button"
+                              className="member-edit-btn"
+                              title="编辑名称、头像与配额设置"
+                              onClick={openProfile}
+                            >
+                              <Pencil size={11} />
+                            </button>
+                            {active && <span className="studio-at">@</span>}
+                          </div>
+
+                          {isExpanded && (
+                            <div className="member-quick-card">
+                              <div className="mqc-meta">{m.subtitle}</div>
+                              <div className="mqc-stats">
+                                <div className="mqc-stat-row">
+                                  <span className="mqc-label">累计消耗</span>
+                                  <span className="mqc-val">
+                                    {usageRec && usageRec.totalTokens > 0
+                                      ? `${(usageRec.exactTokens || 0) === 0 ? '~' : ''}${formatCompactTokens(usageRec.totalTokens)} tok · ${usageRec.calls}次`
+                                      : '暂无记录'}
+                                  </span>
+                                </div>
+                                <div className="mqc-stat-row">
+                                  <span className="mqc-label">剩余用量</span>
+                                  <span className={`mqc-val ${quotaSummary ? 'is-accent' : 'is-muted'}`}>
+                                    {quotaSummary ? quotaSummary.text : '未校准'}
+                                  </span>
+                                </div>
+                                {quotaSummary && quotaSummary.usedPct !== undefined && quotaSummary.remainPct !== undefined && (
+                                  <div className="mqc-bar-track">
+                                    <div
+                                      className={`mqc-bar-fill ${quotaSummary.remainPct <= 10 ? 'is-danger' : quotaSummary.remainPct <= 25 ? 'is-warn' : ''}`}
+                                      style={{ width: `${Math.min(100, quotaSummary.usedPct)}%` }}
+                                    />
+                                  </div>
+                                )}
+                              </div>
+
+                              {recentMemberMsgs.length > 0 && (
+                                <div className="mqc-msgs">
+                                  <div className="mqc-msgs-head">最近发言</div>
+                                  {recentMemberMsgs.map((rm) => {
+                                    const snippet = rm.content
+                                      .replace(/[#*`>\n]+/g, ' ')
+                                      .replace(/\s+/g, ' ')
+                                      .trim()
+                                      .slice(0, 68);
+                                    const tokCount =
+                                      rm.usage?.totalTokens || estimateInlineTokens(rm.content);
+                                    return (
+                                      <div key={rm.id} className="mqc-msg-item">
+                                        <div className="mqc-msg-top">
+                                          <span>{formatTime(rm.createdAt)}</span>
+                                          <span>
+                                            {rm.usage && !rm.usage.estimated ? '' : '~'}
+                                            {formatCompactTokens(tokCount)} tok
+                                          </span>
+                                        </div>
+                                        <div className="mqc-msg-text">
+                                          {snippet}
+                                          {rm.content.length > 68 ? '…' : ''}
+                                        </div>
+                                      </div>
+                                    );
+                                  })}
+                                </div>
                               )}
-                              {lvl !== 'default' && !isOffline && (
-                                <span className="member-effort-tag">{getThinkingLabel(lvl)}</span>
+
+                              {!isOffline && (
+                                <div className="mqc-actions">
+                                  <button
+                                    type="button"
+                                    className="mqc-btn is-primary"
+                                    style={{ flex: 1 }}
+                                    onClick={(e) => {
+                                      e.stopPropagation();
+                                      mentionMemberQuick(m.id, m.name);
+                                    }}
+                                  >
+                                    @点名 {m.name}
+                                  </button>
+                                </div>
                               )}
                             </div>
-                          </div>
-                          <button
-                            type="button"
-                            className="member-edit-btn"
-                            title="快捷重命名、自定义头像与上下线状态"
-                            onClick={openProfile}
-                          >
-                            <Pencil size={11} />
-                          </button>
-                          {active && <span className="studio-at">@</span>}
+                          )}
                         </div>
                       );
                     })
@@ -2210,23 +2615,6 @@ export const App: React.FC = () => {
           </div>
 
           <div className="studio-topbar-right">
-            <div className="studio-segmented" role="group">
-              <button
-                type="button"
-                className={executionMode === 'mock' ? 'active' : ''}
-                onClick={() => setExecutionMode('mock')}
-              >
-                模拟
-              </button>
-              <button
-                type="button"
-                className={executionMode === 'real' ? 'active' : ''}
-                onClick={() => setExecutionMode('real')}
-              >
-                真实
-              </button>
-            </div>
-
             <button
               type="button"
               className="studio-icon-btn"
@@ -2247,6 +2635,22 @@ export const App: React.FC = () => {
               }}
             >
               {showRinne ? <UserRound size={15} /> : <UserRoundX size={15} />}
+            </button>
+
+            <button
+              type="button"
+              className={`studio-canvas-toggle ${showProjectWorkspace ? 'active' : ''}`}
+              title={`打开 / 收起本地项目工作区：${repoPath}`}
+              onClick={() => {
+                if (showProjectWorkspace) {
+                  closeRightSplitPane();
+                } else {
+                  openProjectWorkspace();
+                }
+              }}
+            >
+              <FolderOpen size={13} />
+              <span>工作区</span>
             </button>
 
             <button
@@ -2336,9 +2740,14 @@ export const App: React.FC = () => {
                 ]}
               />
             ) : (
-              messages
-                .filter((m) => !(m.role === 'system' && m.content.startsWith('欢迎来到')))
-                .map((msg) => {
+              <>
+                {messages
+                  .filter(
+                    (m) =>
+                      !(m.role === 'system' && m.content.startsWith('欢迎来到')) &&
+                      m.status !== 'streaming',
+                  )
+                  .map((msg) => {
                   if (msg.role === 'system') {
                     return (
                       <div key={msg.id} className="studio-sys-event">
@@ -2392,7 +2801,7 @@ export const App: React.FC = () => {
                   return (
                     <article
                       key={msg.id}
-                      className={`studio-ai-turn ${msg.status === 'streaming' ? 'is-streaming' : ''}`}
+                      className="studio-ai-turn"
                     >
                       <div className="studio-ai-head">
                         <MemberAvatar
@@ -2401,12 +2810,6 @@ export const App: React.FC = () => {
                           color={displayColor}
                           size={22}
                           radius={6}
-                          onClick={
-                            liveProfile
-                              ? () => setEditingMember(liveProfile)
-                              : undefined
-                          }
-                          title={liveProfile ? '点击快捷修改名称与头像' : undefined}
                         />
                         <span className="studio-ai-name">{displaySenderName}</span>
                         {msg.stageTitle && (
@@ -2457,7 +2860,142 @@ export const App: React.FC = () => {
                       <div
                         className={`studio-ai-content ${msg.status === 'error' ? 'is-error' : ''}`}
                       >
-                        {msg.status === 'streaming' ? (() => {
+                        {msg.logs.length > 0 && (
+                          <details className="studio-thought-toggle">
+                            <summary>
+                              <Terminal size={12} />
+                              <span>
+                                执行过程（{msg.logs.length} 条日志
+                                {msg.durationMs
+                                  ? ` · ${(msg.durationMs / 1000).toFixed(1)}s`
+                                  : ''}
+                                ）
+                              </span>
+                            </summary>
+                            <div className="studio-thought-body">
+                              {msg.commandPreview && (
+                                <div className="cmd-preview">$ {msg.commandPreview}</div>
+                              )}
+                              <div className="log-box">{msg.logs.join('\n')}</div>
+                            </div>
+                          </details>
+                        )}
+
+                        <MarkdownView content={msg.content} />
+
+                        {msg.status === 'error' && (() => {
+                          const diag = diagnoseMessageError(msg.content);
+                          const isExternalAgent = connectedAgents.some((a) => a.id === msg.senderId);
+                          return (
+                            <div className="error-diag-card">
+                              <div className="error-diag-head">
+                                <Wrench size={12} />
+                                <strong>解决方法 · {diag.title}</strong>
+                              </div>
+                              <div className="error-diag-reason">{diag.reason}</div>
+                              <ul className="error-diag-steps">
+                                {diag.steps.map((st, idx) => (
+                                  <li key={idx}>{st}</li>
+                                ))}
+                              </ul>
+                              <div className="error-diag-ops">
+                                {diag.suggestStandby && isExternalAgent && (
+                                  <button
+                                    type="button"
+                                    className="btn btn-ink btn-sm"
+                                    style={{ height: 25, fontSize: 11 }}
+                                    onClick={async () => {
+                                      await navigator.clipboard.writeText(buildStandbyPrompt(msg.senderId));
+                                      setCopiedId(`err_standby_${msg.id}`);
+                                      flash(`已复制「${displaySenderName}」保活待命指令`);
+                                      setTimeout(() => setCopiedId(''), 1800);
+                                    }}
+                                  >
+                                    <Copy size={11} />
+                                    {copiedId === `err_standby_${msg.id}` ? '已复制保活指令' : '复制保活待命指令'}
+                                  </button>
+                                )}
+                                {diag.suggestProviders && (
+                                  <button
+                                    type="button"
+                                    className="btn btn-sm"
+                                    style={{ height: 25, fontSize: 11 }}
+                                    onClick={() => setShowProviders(true)}
+                                  >
+                                    <Settings2 size={11} />
+                                    检查模型池
+                                  </button>
+                                )}
+                                <button
+                                  type="button"
+                                  className="btn btn-sm"
+                                  style={{ height: 25, fontSize: 11 }}
+                                  onClick={() => setShowTroubleshoot(true)}
+                                >
+                                  <Wrench size={11} />
+                                  排障中心
+                                </button>
+                              </div>
+                            </div>
+                          );
+                        })()}
+
+                        <div className="studio-turn-actions">
+                          <button
+                            type="button"
+                            className="turn-action-btn"
+                            onClick={() => void handleCopyMsg(msg)}
+                          >
+                            <Copy size={12} />
+                            {copiedId === msg.id ? '已复制' : '复制'}
+                          </button>
+                          <button
+                            type="button"
+                            className="turn-action-btn"
+                            title="一键存入全局资料库，后续所有会话和模型都能自动参考"
+                            onClick={() => void handleArchiveMessageToKnowledge(msg)}
+                          >
+                            <BookOpen size={12} />
+                            存为资料
+                          </button>
+                          {msg.stageId && msg.stageId !== 'user_requirement' && (
+                            <button
+                              type="button"
+                              className="turn-action-btn"
+                              onClick={() => void handleRerunFromNode(msg.stageId!)}
+                            >
+                              <RotateCcw size={12} />
+                              从此重跑
+                            </button>
+                          )}
+                        </div>
+                      </div>
+                    </article>
+                  );
+                })}
+
+                {/* Dedicated Live Waiting / Processing Tray (strictly separate from formal reply cards!) */}
+                {(() => {
+                  const pendingList = messages.filter(
+                    (m) => m.role === 'assistant' && m.status === 'streaming',
+                  );
+                  if (pendingList.length === 0) return null;
+                  return (
+                    <section className="live-pending-tray" role="status" aria-live="polite">
+                      <div className="lpt-head">
+                        <span className="lpt-head-left">
+                          <span className="lpt-pulse" />
+                          <span>接单与处理中 · {pendingList.length} 位成员</span>
+                        </span>
+                        <span className="lpt-head-hint">完成后将按实际到达顺序进入上方正式对话</span>
+                      </div>
+
+                      <div className="lpt-list">
+                        {pendingList.map((msg) => {
+                          const liveProfile = memberProfileMap[msg.senderId];
+                          const displaySenderName = liveProfile?.name || msg.senderName;
+                          const displayAvatar = liveProfile?.avatar ?? msg.avatar;
+                          const displayColor = liveProfile?.color || msg.accentColor || '#18181b';
                           const liveAgent = connectedAgents.find((a) => a.id === msg.senderId);
                           const isNowListening = Boolean(liveAgent?.listening);
                           const isBridgeAgent =
@@ -2466,7 +3004,7 @@ export const App: React.FC = () => {
                           const createdMs = new Date(msg.createdAt).getTime();
                           const elapsedSec = Number.isFinite(createdMs)
                             ? Math.max(0, (wakeNowTick - createdMs) / 1000)
-                            : 999;
+                            : 0;
                           const lastListenAgeSec = liveAgent?.lastListenAt
                             ? Math.max(
                                 0,
@@ -2477,246 +3015,273 @@ export const App: React.FC = () => {
                             !isBridgeAgent && lastListenAgeSec < 120 && elapsedSec < 12;
                           const showWakeHelper =
                             Boolean(msg.wakePrompt) && !isNowListening && !inReconnectGrace;
+                          const isStalledWaiting = !isBridgeAgent && elapsedSec >= 35;
+                          const canManualPaste = Boolean(liveAgent);
                           const wakeExpanded = Boolean(expandedWakeIds[msg.id]);
 
-                          const pillText = isNowListening
-                            ? msg.logs.length > 0
-                              ? msg.logs[msg.logs.length - 1]
-                              : `${displaySenderName} 已连上监听待命，正在处理...`
-                            : inReconnectGrace
-                              ? `${displaySenderName} 正在接单处理中...`
-                              : isBridgeAgent
-                                ? `已写入桥接目录 tasks\\，等待 ${displaySenderName} 自动回执...`
-                                : msg.wakePrompt
-                                  ? `任务已就绪，等待 ${displaySenderName} 接单...`
-                                  : msg.logs.length > 0
-                                    ? msg.logs[msg.logs.length - 1]
-                                    : `${displaySenderName} 正在思考与执行...`;
+                          const statusText = isStalledWaiting
+                            ? '等待较久：可能成员端弹出了确认框，请切过去点允许，或点右侧跳过 / 手动粘贴回复'
+                            : isNowListening
+                              ? msg.logs.length > 0
+                                ? msg.logs[msg.logs.length - 1]
+                                : '已接单，正在生成回复…'
+                              : inReconnectGrace
+                                ? '正在接单处理中…'
+                                : isBridgeAgent
+                                  ? '等待本轮回复（粘贴问题后 1 秒自动回执）'
+                                  : msg.wakePrompt
+                                    ? '任务已就绪，等待接单…'
+                                    : msg.logs.length > 0
+                                      ? msg.logs[msg.logs.length - 1]
+                                      : '正在思考与生成…';
 
                           return (
-                            <div className="studio-pending-block">
-                              <div className="studio-thinking-pill">
-                                <Loader2 size={14} className="spin" />
-                                <span>{pillText}</span>
-                              </div>
-                              {showWakeHelper && (
-                                <div className={`wake-compact-bar ${isBridgeAgent ? 'is-bridge' : ''}`}>
-                                  <div className="wake-compact-head">
-                                    <span className="wake-compact-label">
-                                      <span className={`wake-compact-dot ${isBridgeAgent ? 'is-bridge' : ''}`} />
-                                      {isBridgeAgent
-                                        ? '文件夹桥接模式 · 无需手动唤醒'
-                                        : '未检测到保活监听'}
-                                    </span>
-                                    <div className="wake-compact-actions">
-                                      {isBridgeAgent ? (
-                                        <button
-                                          type="button"
-                                          className="btn btn-sm wake-mini-btn"
-                                          title="复制文件夹桥接接入指令"
-                                          onClick={async () => {
-                                            await navigator.clipboard.writeText(
+                            <div
+                              key={msg.id}
+                              className={`lpt-card ${isStalledWaiting ? 'is-wake' : showWakeHelper ? (isBridgeAgent ? 'is-bridge' : 'is-wake') : 'is-active'}`}
+                            >
+                              <div className="lpt-row">
+                                <div className="lpt-who">
+                                  <MemberAvatar
+                                    name={displaySenderName}
+                                    avatar={displayAvatar}
+                                    color={displayColor}
+                                    size={20}
+                                    radius={5}
+                                    status="busy"
+                                  />
+                                  <span className="lpt-name">{displaySenderName}</span>
+                                  {msg.stageTitle && (
+                                    <span className="lpt-stage">{msg.stageTitle}</span>
+                                  )}
+                                </div>
+
+                                <div className="lpt-status">
+                                  <Loader2 size={12} className="spin" />
+                                  <span className="lpt-status-text" title={statusText}>
+                                    {statusText}
+                                  </span>
+                                  <span className="lpt-elapsed">{Math.floor(elapsedSec)}s</span>
+                                </div>
+
+                                <div className="lpt-actions">
+                                  {showWakeHelper && isBridgeAgent && (
+                                    <>
+                                      <button
+                                        type="button"
+                                        className="btn btn-ink btn-sm wake-mini-btn"
+                                        title="复制单轮直答指令（直接包含本轮问题与回执文件路径，不含轮询/待命字眼）"
+                                        onClick={async () => {
+                                          await navigator.clipboard.writeText(
+                                            msg.bridgeDirectPrompt ||
                                               buildFileBridgePrompt(msg.senderId, displaySenderName),
-                                            );
-                                            setCopiedId(`bridge_${msg.id}`);
-                                            flash(`已复制「${displaySenderName}」文件夹桥接指令`);
-                                            setTimeout(() => setCopiedId(''), 1800);
-                                          }}
-                                        >
-                                          <Copy size={11} />
-                                          {copiedId === `bridge_${msg.id}` ? '已复制' : '复制桥接指令'}
-                                        </button>
+                                          );
+                                          setCopiedId(`bridge_${msg.id}`);
+                                          flash(`已复制本轮直答指令，直接粘贴发给「${displaySenderName}」即可`);
+                                          setTimeout(() => setCopiedId(''), 2000);
+                                        }}
+                                      >
+                                        <Copy size={11} />
+                                        {copiedId === `bridge_${msg.id}` ? '已复制' : '复制本轮问题'}
+                                      </button>
+                                      <button
+                                        type="button"
+                                        className="btn btn-sm wake-mini-btn"
+                                        onClick={() => {
+                                          if (manualReplyMsgId === msg.id) {
+                                            setManualReplyMsgId(null);
+                                          } else {
+                                            setManualReplyMsgId(msg.id);
+                                            setManualReplyText('');
+                                          }
+                                        }}
+                                      >
+                                        {manualReplyMsgId === msg.id ? '收起' : '粘贴回复'}
+                                      </button>
+                                    </>
+                                  )}
+
+                                  {showWakeHelper && !isBridgeAgent && (
+                                    <>
+                                      <button
+                                        type="button"
+                                        className="btn btn-ink btn-sm wake-mini-btn"
+                                        title="复制零耗保活长连接待命指令发给该模型"
+                                        onClick={async () => {
+                                          await navigator.clipboard.writeText(
+                                            buildStandbyPrompt(msg.senderId),
+                                          );
+                                          setCopiedId(`standby_${msg.id}`);
+                                          flash('已复制保活待命指令，发给对方即可恢复自动秒回');
+                                          setTimeout(() => setCopiedId(''), 1800);
+                                        }}
+                                      >
+                                        <Terminal size={11} />
+                                        {copiedId === `standby_${msg.id}` ? '已复制' : '保活指令'}
+                                      </button>
+                                      <button
+                                        type="button"
+                                        className="btn btn-sm wake-mini-btn"
+                                        onClick={async () => {
+                                          await navigator.clipboard.writeText(msg.wakePrompt!);
+                                          setCopiedId(`wake_${msg.id}`);
+                                          setTimeout(() => setCopiedId(''), 1600);
+                                        }}
+                                      >
+                                        <Copy size={11} />
+                                        {copiedId === `wake_${msg.id}` ? '已复制' : '单次唤醒'}
+                                      </button>
+                                    </>
+                                  )}
+
+                                  {!showWakeHelper && isStalledWaiting && canManualPaste && (
+                                    <button
+                                      type="button"
+                                      className="btn btn-sm wake-mini-btn"
+                                      title="若成员端确认框阻断了自动回执，可直接把对方回复粘贴回填到群聊"
+                                      onClick={() => {
+                                        if (manualReplyMsgId === msg.id) {
+                                          setManualReplyMsgId(null);
+                                        } else {
+                                          setManualReplyMsgId(msg.id);
+                                          setManualReplyText('');
+                                        }
+                                      }}
+                                    >
+                                      {manualReplyMsgId === msg.id ? '收起' : '粘贴回复'}
+                                    </button>
+                                  )}
+
+                                  {activeRun && (
+                                    <button
+                                      type="button"
+                                      className="btn btn-sm wake-mini-btn"
+                                      title="仅跳过并取消这一条等待，立即释放该成员且不影响其他模型"
+                                      onClick={async () => {
+                                        try {
+                                          const { run } = await api.cancelMessage(activeRun.id, msg.id);
+                                          setActiveRun(run);
+                                          if (manualReplyMsgId === msg.id) {
+                                            setManualReplyMsgId(null);
+                                            setManualReplyText('');
+                                          }
+                                          flash(`已取消等待「${displaySenderName}」`);
+                                        } catch (err) {
+                                          flash(err instanceof Error ? err.message : '取消失败');
+                                        }
+                                      }}
+                                    >
+                                      取消
+                                    </button>
+                                  )}
+
+                                  {(showWakeHelper || msg.logs.length > 0) && (
+                                    <button
+                                      type="button"
+                                      className="wake-detail-toggle"
+                                      onClick={() =>
+                                        setExpandedWakeIds((prev) => ({
+                                          ...prev,
+                                          [msg.id]: !prev[msg.id],
+                                        }))
+                                      }
+                                    >
+                                      {wakeExpanded ? '收起 ▴' : '详情 ▾'}
+                                    </button>
+                                  )}
+                                </div>
+                              </div>
+
+                              {manualReplyMsgId === msg.id && (
+                                <div className="wake-manual-reply">
+                                  <textarea
+                                    className="textarea"
+                                    rows={3}
+                                    placeholder={`把「${displaySenderName}」的回复直接粘贴到这里，点右侧提交即可进入正式对话...`}
+                                    value={manualReplyText}
+                                    onChange={(e) => setManualReplyText(e.target.value)}
+                                  />
+                                  <div className="wake-manual-reply-actions">
+                                    <button
+                                      type="button"
+                                      className="btn btn-sm"
+                                      onClick={() => {
+                                        setManualReplyMsgId(null);
+                                        setManualReplyText('');
+                                      }}
+                                    >
+                                      取消
+                                    </button>
+                                    <button
+                                      type="button"
+                                      className="btn btn-primary btn-sm"
+                                      disabled={submittingManualReply || !manualReplyText.trim()}
+                                      onClick={async () => {
+                                        if (!manualReplyText.trim()) return;
+                                        setSubmittingManualReply(true);
+                                        try {
+                                          await api.submitAgentReply(msg.senderId, {
+                                            taskId: msg.bridgeTaskId,
+                                            content: manualReplyText.trim(),
+                                          });
+                                          setManualReplyMsgId(null);
+                                          setManualReplyText('');
+                                          flash(`已提交「${displaySenderName}」的回复`);
+                                        } catch (err) {
+                                          flash(err instanceof Error ? err.message : '提交回复失败');
+                                        } finally {
+                                          setSubmittingManualReply(false);
+                                        }
+                                      }}
+                                    >
+                                      {submittingManualReply ? '提交中…' : '提交到正式对话'}
+                                    </button>
+                                  </div>
+                                </div>
+                              )}
+
+                              {wakeExpanded && (
+                                <div className="wake-detail-drawer">
+                                  {showWakeHelper && (
+                                    <div className="wake-detail-note">
+                                      {isBridgeAgent ? (
+                                        <span>
+                                          点「复制本轮问题」直接带上问题与回执路径（<code>chatroom-bridge\{msg.senderId}\replies\</code>），不要求后台轮询；对方写完文件 1 秒自动进入正式对话。
+                                        </span>
                                       ) : (
-                                        <>
-                                          <button
-                                            type="button"
-                                            className="btn btn-ink btn-sm wake-mini-btn"
-                                            title="复制零耗保活长连接待命指令发给该模型（每 15s 保活心跳 / 0 token / 重启自动重连）"
-                                            onClick={async () => {
-                                              await navigator.clipboard.writeText(
-                                                buildStandbyPrompt(msg.senderId),
-                                              );
-                                              setCopiedId(`standby_${msg.id}`);
-                                              flash('已复制保活待命指令，发给对方即可恢复自动秒回');
-                                              setTimeout(() => setCopiedId(''), 1800);
-                                            }}
-                                          >
-                                            <Terminal size={11} />
-                                            {copiedId === `standby_${msg.id}` ? '已复制' : '复制保活指令'}
-                                          </button>
-                                          <button
-                                            type="button"
-                                            className="btn btn-sm wake-mini-btn"
-                                            onClick={async () => {
-                                              await navigator.clipboard.writeText(msg.wakePrompt!);
-                                              setCopiedId(`wake_${msg.id}`);
-                                              setTimeout(() => setCopiedId(''), 1600);
-                                            }}
-                                          >
-                                            <Copy size={11} />
-                                            {copiedId === `wake_${msg.id}` ? '已复制' : '单次唤醒'}
-                                          </button>
-                                        </>
+                                        <span>
+                                          {displaySenderName} 当前未挂起「⚡ 监听待命」。发送<strong>保活指令</strong>即可恢复 0 token 自动秒回。
+                                        </span>
                                       )}
                                       <button
                                         type="button"
-                                        className="wake-detail-toggle"
-                                        onClick={() =>
-                                          setExpandedWakeIds((prev) => ({
-                                            ...prev,
-                                            [msg.id]: !prev[msg.id],
-                                          }))
-                                        }
+                                        className="wake-diag-link"
+                                        onClick={() => setShowTroubleshoot(true)}
                                       >
-                                        {wakeExpanded ? '收起 ▴' : '详情 ▾'}
+                                        排障中心 →
                                       </button>
                                     </div>
-                                  </div>
-
-                                  {wakeExpanded && (
-                                    <div className="wake-detail-drawer">
-                                      <div className="wake-detail-note">
-                                        {isBridgeAgent ? (
-                                          <span>
-                                            {displaySenderName} 通过本地目录 <code>chatroom-bridge\{msg.senderId}\tasks</code> 接收任务并写回 <code>replies\</code>。若长时间未回复，请确认对方窗口的监听脚本或定时任务仍在运行。
-                                          </span>
-                                        ) : (
-                                          <span>
-                                            {displaySenderName} 当前未挂起「⚡ 监听待命」（可能是首次未启动、上次点了单次唤醒或对方会话已退出）。发送<strong>保活待命指令</strong>即可恢复 0 token 自动秒回；一旦对方接单本提示将自动隐藏。
-                                          </span>
-                                        )}
-                                        <button
-                                          type="button"
-                                          className="wake-diag-link"
-                                          onClick={() => setShowTroubleshoot(true)}
-                                        >
-                                          排障中心 →
-                                        </button>
-                                      </div>
-                                      <div className="wake-code">{msg.wakePrompt}</div>
+                                  )}
+                                  {showWakeHelper && (
+                                    <div className="wake-code">
+                                      {isBridgeAgent && msg.bridgeDirectPrompt
+                                        ? msg.bridgeDirectPrompt
+                                        : msg.wakePrompt}
                                     </div>
+                                  )}
+                                  {msg.logs.length > 0 && (
+                                    <div className="log-box">{msg.logs.join('\n')}</div>
                                   )}
                                 </div>
                               )}
                             </div>
                           );
-                        })() : (
-                          <>
-                            {msg.logs.length > 0 && (
-                              <details className="studio-thought-toggle">
-                                <summary>
-                                  <Terminal size={12} />
-                                  <span>
-                                    执行过程（{msg.logs.length} 条日志
-                                    {msg.durationMs
-                                      ? ` · ${(msg.durationMs / 1000).toFixed(1)}s`
-                                      : ''}
-                                    ）
-                                  </span>
-                                </summary>
-                                <div className="studio-thought-body">
-                                  {msg.commandPreview && (
-                                    <div className="cmd-preview">$ {msg.commandPreview}</div>
-                                  )}
-                                  <div className="log-box">{msg.logs.join('\n')}</div>
-                                </div>
-                              </details>
-                            )}
-
-                            <MarkdownView content={msg.content} />
-
-                            {msg.status === 'error' && (() => {
-                              const diag = diagnoseMessageError(msg.content);
-                              const isExternalAgent = connectedAgents.some((a) => a.id === msg.senderId);
-                              return (
-                                <div className="error-diag-card">
-                                  <div className="error-diag-head">
-                                    <Wrench size={12} />
-                                    <strong>解决方法 · {diag.title}</strong>
-                                  </div>
-                                  <div className="error-diag-reason">{diag.reason}</div>
-                                  <ul className="error-diag-steps">
-                                    {diag.steps.map((st, idx) => (
-                                      <li key={idx}>{st}</li>
-                                    ))}
-                                  </ul>
-                                  <div className="error-diag-ops">
-                                    {diag.suggestStandby && isExternalAgent && (
-                                      <button
-                                        type="button"
-                                        className="btn btn-ink btn-sm"
-                                        style={{ height: 25, fontSize: 11 }}
-                                        onClick={async () => {
-                                          await navigator.clipboard.writeText(buildStandbyPrompt(msg.senderId));
-                                          setCopiedId(`err_standby_${msg.id}`);
-                                          flash(`已复制「${displaySenderName}」保活待命指令`);
-                                          setTimeout(() => setCopiedId(''), 1800);
-                                        }}
-                                      >
-                                        <Copy size={11} />
-                                        {copiedId === `err_standby_${msg.id}` ? '已复制保活指令' : '复制保活待命指令'}
-                                      </button>
-                                    )}
-                                    {diag.suggestProviders && (
-                                      <button
-                                        type="button"
-                                        className="btn btn-sm"
-                                        style={{ height: 25, fontSize: 11 }}
-                                        onClick={() => setShowProviders(true)}
-                                      >
-                                        <Settings2 size={11} />
-                                        检查模型池
-                                      </button>
-                                    )}
-                                    <button
-                                      type="button"
-                                      className="btn btn-sm"
-                                      style={{ height: 25, fontSize: 11 }}
-                                      onClick={() => setShowTroubleshoot(true)}
-                                    >
-                                      <Wrench size={11} />
-                                      排障中心
-                                    </button>
-                                  </div>
-                                </div>
-                              );
-                            })()}
-
-                            <div className="studio-turn-actions">
-                              <button
-                                type="button"
-                                className="turn-action-btn"
-                                onClick={() => void handleCopyMsg(msg)}
-                              >
-                                <Copy size={12} />
-                                {copiedId === msg.id ? '已复制' : '复制'}
-                              </button>
-                              <button
-                                type="button"
-                                className="turn-action-btn"
-                                title="一键存入全局资料库，后续所有会话和模型都能自动参考"
-                                onClick={() => void handleArchiveMessageToKnowledge(msg)}
-                              >
-                                <BookOpen size={12} />
-                                存为资料
-                              </button>
-                              {msg.stageId && msg.stageId !== 'user_requirement' && (
-                                <button
-                                  type="button"
-                                  className="turn-action-btn"
-                                  onClick={() => void handleRerunFromNode(msg.stageId!)}
-                                >
-                                  <RotateCcw size={12} />
-                                  从此重跑
-                                </button>
-                              )}
-                            </div>
-                          </>
-                        )}
+                        })}
                       </div>
-                    </article>
+                    </section>
                   );
-                })
+                })()}
+              </>
             )}
 
             {/* Inline Human Approval Card */}
@@ -3140,7 +3705,12 @@ export const App: React.FC = () => {
                           }}
                         >
                           <span className={`presence-dot ${s.enabled ? 'idle' : 'offline'}`} />
-                          <span>技能：{s.name}</span>
+                          <span>
+                            技能：{s.name}
+                            {s.targetMemberIds && s.targetMemberIds.length > 0
+                              ? `（仅${s.targetMemberIds.length}人）`
+                              : ''}
+                          </span>
                         </button>
                       ))}
                     {workbench.knowledge.map((k) => (
@@ -3182,101 +3752,304 @@ export const App: React.FC = () => {
               </div>
             )}
 
-            {showWorkflowPicker && workflow && (
-              <div className="wf-picker-popover">
-                <div className="thinking-popover-head">
-                  <span>选择工作流模板并为各节点指派模型</span>
-                  <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+            {showWorkflowPicker && workflow && (() => {
+              const catTabs: Array<{
+                key: 'all' | 'dev' | 'review' | 'brainstorm' | 'writing' | 'custom';
+                label: string;
+              }> = [
+                { key: 'all', label: '全部' },
+                { key: 'review', label: '评审' },
+                { key: 'dev', label: '研发' },
+                { key: 'brainstorm', label: '脑暴' },
+                { key: 'writing', label: '写作' },
+                { key: 'custom', label: '自定义' },
+              ];
+              const filteredTemplates = workflowTemplates.filter((tpl) => {
+                if (wfCategoryFilter === 'all') return true;
+                if (wfCategoryFilter === 'custom') return !tpl.builtin;
+                return tpl.category === wfCategoryFilter;
+              });
+              const depKeyCounts = new Map<string, number>();
+              for (const n of workflow.nodes) {
+                if (n.kind === 'human_input' || n.enabled === false) continue;
+                const k = (n.dependsOn || []).slice().sort().join(',');
+                if (k) depKeyCounts.set(k, (depKeyCounts.get(k) || 0) + 1);
+              }
+              const onlineIdSet = new Set(activeMemberIds);
+              const fallbackProviders = combinedProviders.filter((p) => !onlineIdSet.has(p.id));
+
+              return (
+                <div className="wf-picker-popover">
+                  <div className="thinking-popover-head">
+                    <span>工作流模板与成员指派</span>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                      <button
+                        type="button"
+                        className={`quick-ext-manage-link ${showWfAiGen ? 'active' : ''}`}
+                        onClick={() => setShowWfAiGen((v) => !v)}
+                        title="输入一句话让 AI 生成或修改当前工作流模板"
+                      >
+                        <Sparkles size={11} />
+                        <span>AI 生成</span>
+                      </button>
+                      <button
+                        type="button"
+                        className="quick-ext-manage-link"
+                        onClick={() => void handleCreateBlankCanvas()}
+                        title="新建一个空白工作流画布从零编排"
+                      >
+                        <Plus size={11} />
+                        <span>新建画布</span>
+                      </button>
+                      <button
+                        type="button"
+                        className="quick-ext-manage-link"
+                        onClick={openWorkflowCanvas}
+                      >
+                        画布编排 →
+                      </button>
+                      <button
+                        type="button"
+                        className="mini-icon-btn"
+                        onClick={() => setShowWorkflowPicker(false)}
+                      >
+                        ×
+                      </button>
+                    </div>
+                  </div>
+
+                  {showWfAiGen && (
+                    <div className="wf-ai-inline-bar">
+                      <select
+                        className="input wf-ai-gen-select"
+                        title="选择负责设计工作流的 AI 模型或成员"
+                        value={wfAiGeneratorId}
+                        disabled={wfAiBusy}
+                        onChange={(e) => handleChangeWfAiGeneratorId(e.target.value)}
+                      >
+                        <option value="auto">✨ 自动选择 AI</option>
+                        {wfAiGeneratorOptions.some((o) => o.group === 'agent') && (
+                          <optgroup label="在线成员（实时调用）">
+                            {wfAiGeneratorOptions
+                              .filter((o) => o.group === 'agent')
+                              .map((o) => (
+                                <option key={o.id} value={o.id}>
+                                  {o.label}
+                                </option>
+                              ))}
+                          </optgroup>
+                        )}
+                        {wfAiGeneratorOptions.some((o) => o.group === 'api') && (
+                          <optgroup label="模型池 API">
+                            {wfAiGeneratorOptions
+                              .filter((o) => o.group === 'api')
+                              .map((o) => (
+                                <option key={o.id} value={o.id}>
+                                  {o.label}
+                                </option>
+                              ))}
+                          </optgroup>
+                        )}
+                        <option value="local">⚡ 本地秒生（0 消耗）</option>
+                      </select>
+                      <input
+                        className="input"
+                        style={{ flex: 1, minWidth: 120, padding: '5px 8px', fontSize: 12 }}
+                        autoFocus
+                        placeholder="一句话描述流程，如：3模型短视频脚本策划流，最后加人工拍板"
+                        value={wfAiPrompt}
+                        disabled={wfAiBusy}
+                        onChange={(e) => setWfAiPrompt(e.target.value)}
+                        onKeyDown={(e) => {
+                          if (e.key === 'Enter' && !wfAiBusy && wfAiPrompt.trim()) {
+                            void handleGenerateWorkflowFromPrompt(wfAiPrompt);
+                          }
+                        }}
+                      />
+                      {wfAiBusy ? (
+                        <button
+                          type="button"
+                          className="btn btn-sm"
+                          style={{ flexShrink: 0 }}
+                          title="若成员端弹出了确认框，可先切去点允许，或点此立即取消等待"
+                          onClick={handleCancelWorkflowGenerate}
+                        >
+                          <Loader2 size={12} className="spin" />
+                          取消等待
+                        </button>
+                      ) : (
+                        <button
+                          type="button"
+                          className="btn btn-ink btn-sm"
+                          style={{ flexShrink: 0 }}
+                          disabled={!wfAiPrompt.trim()}
+                          onClick={() => void handleGenerateWorkflowFromPrompt(wfAiPrompt)}
+                        >
+                          <Sparkles size={12} />
+                          生成
+                        </button>
+                      )}
+                    </div>
+                  )}
+
+                  {/* Category Filter Tabs */}
+                  <div className="wf-cat-tabs">
+                    {catTabs.map((ct) => (
+                      <button
+                        key={ct.key}
+                        type="button"
+                        className={`wf-cat-tab ${wfCategoryFilter === ct.key ? 'active' : ''}`}
+                        onClick={() => setWfCategoryFilter(ct.key)}
+                      >
+                        {ct.label}
+                      </button>
+                    ))}
+                  </div>
+
+                  {/* Categorized 2-Column Template Cards */}
+                  <div className="wf-tpl-card-grid">
+                    {filteredTemplates.length === 0 ? (
+                      <div className="wf-tpl-empty">
+                        当前分类暂无模板，可点右上角「AI 生成」或去画布另存自定义模板。
+                      </div>
+                    ) : (
+                      filteredTemplates.map((tpl) => {
+                        const isActive = workflow.id === tpl.id;
+                        return (
+                          <button
+                            key={tpl.id}
+                            type="button"
+                            className={`wf-tpl-card ${isActive ? 'active' : ''}`}
+                            onClick={() => void handleApplyWorkflowTemplate(tpl.id)}
+                            title={tpl.description}
+                          >
+                            <div className="wf-tpl-card-head">
+                              <span className="wf-tpl-card-name">{tpl.name}</span>
+                              <span className="wf-picker-steps">{tpl.workflow.nodes.length}步</span>
+                            </div>
+                            <div className="wf-tpl-card-desc">{tpl.description}</div>
+                          </button>
+                        );
+                      })
+                    )}
+                  </div>
+
+                  {/* Per-Node Model Assignment & Skip Toggle */}
+                  <div className="wf-nodes-toolbar">
+                    <span className="wf-nodes-toolbar-title">
+                      {workflow.name} · 勾选启停或指派模型
+                    </span>
                     <button
                       type="button"
-                      className="quick-ext-manage-link"
-                      onClick={openWorkflowCanvas}
+                      className="btn btn-sm"
+                      style={{ height: 24, fontSize: 11, padding: '0 8px' }}
+                      title="自动把当前在线成员轮换分配到各步骤（并行分支自动错开不同模型）"
+                      onClick={() => void handleAutoAssignWorkflowModels()}
                     >
-                      在画布中编排 →
+                      <Sparkles size={11} />
+                      一键分配在线模型
                     </button>
+                  </div>
+
+                  <div className="wf-picker-nodes">
+                    {workflow.nodes
+                      .filter((n) => n.kind !== 'human_input')
+                      .map((node, idx) => {
+                        const isEnabled = node.enabled !== false;
+                        const isGate = node.kind === 'human_gate';
+                        const isShell = node.kind === 'shell';
+                        const isNonModel =
+                          isGate ||
+                          isShell ||
+                          node.kind === 'condition' ||
+                          node.kind === 'file_read' ||
+                          node.kind === 'file_write' ||
+                          node.kind === 'http' ||
+                          node.kind === 'delay';
+                        const depKey = (node.dependsOn || []).slice().sort().join(',');
+                        const isParallel = isEnabled && Boolean(depKey) && (depKeyCounts.get(depKey) || 0) >= 2;
+                        return (
+                          <div
+                            key={node.id}
+                            className={`wf-picker-node-row ${isEnabled ? '' : 'is-disabled'}`}
+                          >
+                            <input
+                              type="checkbox"
+                              checked={isEnabled}
+                              title={isEnabled ? '取消勾选跳过此步骤' : '勾选启用此步骤'}
+                              onChange={(e) =>
+                                void handleSaveNode({ ...node, enabled: e.target.checked })
+                              }
+                            />
+                            <span className="wf-picker-node-idx">{idx + 1}</span>
+                            <span className="wf-picker-node-title" title={node.subtitle}>
+                              {node.title}
+                            </span>
+                            {isParallel && <span className="wf-parallel-tag">并行</span>}
+                            {isGate ? (
+                              <span className="sf-human-tag">人工拍板</span>
+                            ) : isShell ? (
+                              <span className="sf-human-tag">命令自检</span>
+                            ) : isNonModel ? (
+                              <span className="sf-human-tag">{node.kind}</span>
+                            ) : (
+                              <select
+                                className={`sf-model-select ${!node.providerId ? 'is-unassigned' : ''}`}
+                                style={{ maxWidth: 152 }}
+                                disabled={!isEnabled}
+                                value={node.providerId || ''}
+                                onChange={(e) =>
+                                  void handleSaveNode({ ...node, providerId: e.target.value })
+                                }
+                              >
+                                <option value="">选择模型（自动）</option>
+                                {activeMembers.length > 0 && (
+                                  <optgroup label="当前在线成员">
+                                    {activeMembers.map((m) => (
+                                      <option key={m.id} value={m.id}>
+                                        {m.name}
+                                      </option>
+                                    ))}
+                                  </optgroup>
+                                )}
+                                {fallbackProviders.length > 0 && (
+                                  <optgroup label="其他模型池">
+                                    {fallbackProviders.map((p) => (
+                                      <option key={p.id} value={p.id}>
+                                        {p.shortName}
+                                      </option>
+                                    ))}
+                                  </optgroup>
+                                )}
+                              </select>
+                            )}
+                          </div>
+                        );
+                      })}
+                  </div>
+
+                  <div className="wf-picker-foot">
+                    <span className="wf-picker-hint">
+                      {input.trim() || pendingAttachments.length > 0
+                        ? '就绪：点击右侧按钮立刻按此模板执行'
+                        : '请先在下方聊天框输入任务需求'}
+                    </span>
                     <button
                       type="button"
-                      className="mini-icon-btn"
-                      onClick={() => setShowWorkflowPicker(false)}
+                      className="btn btn-ink btn-sm"
+                      disabled={!input.trim() && pendingAttachments.length === 0}
+                      onClick={() => {
+                        setShowWorkflowPicker(false);
+                        void handleSend('workflow');
+                      }}
                     >
-                      ×
+                      <Play size={11} />
+                      按此模板启动
                     </button>
                   </div>
                 </div>
-
-                {/* Template Chips */}
-                <div className="wf-picker-chips">
-                  {workflowTemplates.map((tpl) => (
-                    <button
-                      key={tpl.id}
-                      type="button"
-                      className={`wf-picker-chip ${workflow.id === tpl.id ? 'active' : ''}`}
-                      onClick={() => void handleApplyWorkflowTemplate(tpl.id)}
-                      title={tpl.description}
-                    >
-                      <span>{tpl.name}</span>
-                      <span className="wf-picker-steps">{tpl.workflow.nodes.length}步</span>
-                    </button>
-                  ))}
-                </div>
-
-                {/* Per-Node Model Assignment right inside the task launcher! */}
-                <div className="wf-picker-nodes">
-                  {workflow.nodes
-                    .filter((n) => n.kind !== 'human_input' && n.enabled !== false)
-                    .map((node, idx) => {
-                      const isGate = node.kind === 'human_gate';
-                      return (
-                        <div key={node.id} className="wf-picker-node-row">
-                          <span className="wf-picker-node-idx">{idx + 1}</span>
-                          <span className="wf-picker-node-title" title={node.subtitle}>
-                            {node.title}
-                          </span>
-                          {isGate ? (
-                            <span className="sf-human-tag">人工拍板</span>
-                          ) : (
-                            <select
-                              className={`sf-model-select ${!node.providerId ? 'is-unassigned' : ''}`}
-                              style={{ maxWidth: 150 }}
-                              value={node.providerId || ''}
-                              onChange={(e) =>
-                                void handleSaveNode({ ...node, providerId: e.target.value })
-                              }
-                            >
-                              <option value="">选择模型（自动）</option>
-                              {combinedProviders.map((p) => (
-                                <option key={p.id} value={p.id}>
-                                  {p.shortName}
-                                </option>
-                              ))}
-                            </select>
-                          )}
-                        </div>
-                      );
-                    })}
-                </div>
-
-                <div className="wf-picker-foot">
-                  <span className="wf-picker-hint">
-                    {input.trim() || pendingAttachments.length > 0
-                      ? '就绪：点击右侧按钮立刻按此模板执行'
-                      : '请先在下方聊天框输入任务需求'}
-                  </span>
-                  <button
-                    type="button"
-                    className="btn btn-ink btn-sm"
-                    disabled={!input.trim() && pendingAttachments.length === 0}
-                    onClick={() => {
-                      setShowWorkflowPicker(false);
-                      void handleSend('workflow');
-                    }}
-                  >
-                    <Play size={11} />
-                    按此模板启动
-                  </button>
-                </div>
-              </div>
-            )}
+              );
+            })()}
 
             {showThinkingMenu && activeMembers.length > 0 && (
               <div className="thinking-popover">
@@ -3653,39 +4426,41 @@ export const App: React.FC = () => {
                   <button
                     type="button"
                     className="send-circle stop"
-                    title="停止当前回复 / 立刻中断互聊接力"
+                    title="停止所有进行中的回复 / 立刻中断互聊接力"
                     onClick={handleAbort}
                   >
                     <Square size={12} fill="currentColor" />
                   </button>
                 ) : (
-                  <>
-                    <button
-                      type="button"
-                      className={`workflow-pill-btn ${showWorkflowPicker ? 'active' : ''}`}
-                      onClick={() => {
-                        setShowWorkflowPicker((v) => !v);
-                        setShowQuickExtMenu(false);
-                        setShowThinkingMenu(false);
-                        setShowRelayMenu(false);
-                        setAttachMenuMode('closed');
-                      }}
-                      title="选择工作流模板、指定各节点模型并启动板块流程"
-                    >
-                      <GitBranch size={13} />
-                      <span>按板块跑</span>
-                    </button>
-                    <button
-                      type="button"
-                      className="send-circle"
-                      disabled={!input.trim() && pendingAttachments.length === 0}
-                      title="发送给选中的模型 (Enter)"
-                      onClick={() => void handleSend('chat')}
-                    >
-                      <ArrowUp size={16} />
-                    </button>
-                  </>
+                  <button
+                    type="button"
+                    className={`workflow-pill-btn ${showWorkflowPicker ? 'active' : ''}`}
+                    onClick={() => {
+                      setShowWorkflowPicker((v) => !v);
+                      setShowQuickExtMenu(false);
+                      setShowThinkingMenu(false);
+                      setShowRelayMenu(false);
+                      setAttachMenuMode('closed');
+                    }}
+                    title="选择工作流模板、指定各节点模型并启动板块流程"
+                  >
+                    <GitBranch size={13} />
+                    <span>按板块跑</span>
+                  </button>
                 )}
+                <button
+                  type="button"
+                  className="send-circle"
+                  disabled={!input.trim() && pendingAttachments.length === 0}
+                  title={
+                    isRunning
+                      ? '继续发送新消息（无需等上一条回执结束）(Enter)'
+                      : '发送给选中的模型 (Enter)'
+                  }
+                  onClick={() => void handleSend('chat')}
+                >
+                  <ArrowUp size={16} />
+                </button>
               </div>
             </div>
           </div>
@@ -3752,8 +4527,16 @@ export const App: React.FC = () => {
               onSaveNode={handleSaveNode}
               onApplyTemplate={handleApplyWorkflowTemplate}
               onSaveAsTemplate={handleSaveAsWorkflowTemplate}
+              onCreateBlankCanvas={handleCreateBlankCanvas}
               onDeleteTemplate={handleDeleteWorkflowTemplate}
-              onRunWorkflow={(promptText) => void handleSend('workflow', promptText)}
+              onAutoAssignModels={handleAutoAssignWorkflowModels}
+              onGenerateWorkflow={handleGenerateWorkflowFromPrompt}
+              onCancelGenerateWorkflow={handleCancelWorkflowGenerate}
+              aiGeneratorOptions={wfAiGeneratorOptions}
+              aiGeneratorId={wfAiGeneratorId}
+              onChangeAiGeneratorId={handleChangeWfAiGeneratorId}
+              onRunWorkflow={(promptText, dryRun) => void handleSend('workflow', promptText, dryRun)}
+              onAbortWorkflow={handleAbort}
               onRerunFromNode={handleRerunFromNode}
               onOpenApproval={() => setShowApproval(true)}
               onExportMarkdown={handleExportMarkdown}
@@ -3793,6 +4576,10 @@ export const App: React.FC = () => {
           roomId={activeRun?.id || ''}
           agents={connectedAgents}
           onClose={() => setShowInvite(false)}
+          onOpenProviders={() => {
+            setShowInvite(false);
+            setShowProviders(true);
+          }}
           onRenameAgent={handleRenameAgent}
           onDeleteAgent={handleDeleteAgent}
         />
@@ -3819,6 +4606,10 @@ export const App: React.FC = () => {
         <ProvidersModal
           providers={providers}
           onClose={() => setShowProviders(false)}
+          onOpenInvite={() => {
+            setShowProviders(false);
+            setShowInvite(true);
+          }}
           onSaved={(updated) => {
             setProviders(updated);
             void refreshProviderHealth();
@@ -3883,6 +4674,7 @@ export const App: React.FC = () => {
             onToggleOnline={(nextOnline) =>
               handleToggleMemberOnline(editingMember, nextOnline)
             }
+            onDelete={() => handleRemoveMember(editingMember)}
             onSaveQuota={async (quotaPatch: Partial<MemberQuotaConfig>) => {
               const { usage } = await api.updateMemberQuota(editingMember.id, quotaPatch);
               setMemberUsage(usage);
@@ -3906,6 +4698,7 @@ export const App: React.FC = () => {
           initialTab={workbenchTab}
           repoPath={repoPath}
           activeRoomId={activeRun?.id || ''}
+          members={sidebarMembers.map((m) => ({ id: m.id, name: m.name, color: m.color }))}
           onClose={() => setWorkbenchTab(null)}
           onSaveWorkbench={handleSaveWorkbench}
           onTestPlugin={handleTestPlugin}
@@ -3920,6 +4713,133 @@ export const App: React.FC = () => {
           }}
         />
       )}
+      {memberContextMenu && (
+        <div
+          className="member-context-menu"
+          role="menu"
+          style={{ left: memberContextMenu.x, top: memberContextMenu.y }}
+          onClick={(e) => e.stopPropagation()}
+        >
+          <div className="mcm-head">
+            <span
+              className="wb-scope-dot"
+              style={{ background: memberContextMenu.member.color }}
+            />
+            <span className="mcm-title">{memberContextMenu.member.name}</span>
+          </div>
+
+          <button
+            type="button"
+            className="mcm-item"
+            role="menuitem"
+            onClick={() => {
+              const target = memberContextMenu.member;
+              setMemberContextMenu(null);
+              if (target.presence === 'offline') {
+                flash(`「${target.name}」当前离线，请先恢复在线`);
+                return;
+              }
+              if (!selectedTargets.includes(target.id)) {
+                handlePillClick(target.id, target.name);
+              } else {
+                focusTextareaAtEnd();
+              }
+            }}
+          >
+            <AtSign size={13} />
+            <span>@ 点名发言</span>
+          </button>
+
+          <button
+            type="button"
+            className="mcm-item"
+            role="menuitem"
+            onClick={() => {
+              const target = memberContextMenu.member;
+              setMemberContextMenu(null);
+              setEditingMember({
+                id: target.id,
+                name: target.name,
+                kind: target.kind,
+                presence: target.presence,
+                subtitle: target.subtitle,
+                avatar: target.avatar,
+                color: target.color,
+              });
+            }}
+          >
+            <Pencil size={13} />
+            <span>编辑详情 / 改名 / 配额</span>
+          </button>
+
+          <button
+            type="button"
+            className="mcm-item"
+            role="menuitem"
+            onClick={() => {
+              const target = memberContextMenu.member;
+              const nextOnline = target.presence === 'offline';
+              setMemberContextMenu(null);
+              void handleToggleMemberOnline(
+                {
+                  id: target.id,
+                  name: target.name,
+                  kind: target.kind,
+                },
+                nextOnline,
+              );
+            }}
+          >
+            <Power size={13} />
+            <span>{memberContextMenu.member.presence === 'offline' ? '恢复在线' : '设为离线'}</span>
+          </button>
+
+          {memberContextMenu.member.listening && (
+            <button
+              type="button"
+              className="mcm-item"
+              role="menuitem"
+              onClick={() => {
+                const target = memberContextMenu.member;
+                setMemberContextMenu(null);
+                void api.stopAgentStandby(target.id).then(() => {
+                  flash(`已通知「${target.name}」退出待命监听`);
+                });
+              }}
+            >
+              <Square size={12} />
+              <span>停止待命监听</span>
+            </button>
+          )}
+
+          <div className="mcm-sep" />
+
+          <button
+            type="button"
+            className={`mcm-item danger ${memberContextMenu.confirmDelete ? 'confirm' : ''}`}
+            role="menuitem"
+            onClick={async () => {
+              if (!memberContextMenu.confirmDelete) {
+                setMemberContextMenu((prev) =>
+                  prev ? { ...prev, confirmDelete: true } : null,
+                );
+                return;
+              }
+              const target = memberContextMenu.member;
+              setMemberContextMenu(null);
+              try {
+                await handleRemoveMember(target);
+              } catch (err) {
+                flash(err instanceof Error ? err.message : '移除成员失败');
+              }
+            }}
+          >
+            <Trash2 size={13} />
+            <span>{memberContextMenu.confirmDelete ? '再点一次确认移除' : '移除成员'}</span>
+          </button>
+        </div>
+      )}
+
       {previewAttachment && (
         <div className="modal-backdrop" onClick={() => setPreviewAttachment(null)}>
           <div

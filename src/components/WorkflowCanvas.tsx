@@ -140,7 +140,7 @@ const StepNode: React.FC<NodeProps<Node<StepNodeData>>> = ({ data }) => {
 
         {state?.usedMock && status !== 'idle' && (
           <span style={{ color: '#b45309', fontSize: 10.5, fontWeight: 600 }}>
-            模拟
+            演练
           </span>
         )}
       </div>

@@ -1,5 +1,5 @@
 import React, { useRef, useState } from 'react';
-import { Activity, Coins, ImagePlus, Power, RefreshCw, RotateCcw, X } from 'lucide-react';
+import { Activity, Coins, ImagePlus, Power, RefreshCw, RotateCcw, Trash2, X } from 'lucide-react';
 import type { MemberQuotaConfig, MemberUsageRecord, QuotaTrackMode } from '../../shared/types';
 import { MemberAvatar, isImageAvatar } from './MemberAvatar';
 
@@ -28,6 +28,7 @@ interface MemberProfileModalProps {
     accentColor: string;
   }) => Promise<void>;
   onToggleOnline?: (nextOnline: boolean) => Promise<void>;
+  onDelete?: () => Promise<void>;
   onSaveQuota?: (quota: Partial<MemberQuotaConfig>) => Promise<void>;
   onResetUsage?: () => Promise<void>;
   onRefreshBalance?: () => Promise<{ ok: boolean; message?: string; balanceLabel?: string }>;
@@ -112,6 +113,7 @@ export const MemberProfileModal: React.FC<MemberProfileModalProps> = ({
   onClose,
   onSave,
   onToggleOnline,
+  onDelete,
   onSaveQuota,
   onResetUsage,
   onRefreshBalance,
@@ -164,6 +166,8 @@ export const MemberProfileModal: React.FC<MemberProfileModalProps> = ({
   );
   const [savingQuota, setSavingQuota] = useState(false);
   const [refreshingBal, setRefreshingBal] = useState(false);
+  const [confirmDelete, setConfirmDelete] = useState(false);
+  const [deleting, setDeleting] = useState(false);
   const [quotaMsg, setQuotaMsg] = useState('');
   const [error, setError] = useState('');
   const fileRef = useRef<HTMLInputElement | null>(null);
@@ -1063,17 +1067,68 @@ export const MemberProfileModal: React.FC<MemberProfileModalProps> = ({
             )}
           </div>
 
-          <div className="modal-footer">
-            <button type="button" className="btn" onClick={onClose}>
-              取消
-            </button>
-            <button
-              type="submit"
-              className="btn btn-ink"
-              disabled={saving || !name.trim()}
-            >
-              {saving ? '保存中...' : '保存修改'}
-            </button>
+          <div
+            className="modal-footer"
+            style={{ justifyContent: onDelete ? 'space-between' : 'flex-end' }}
+          >
+            {onDelete && (
+              <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                {confirmDelete ? (
+                  <>
+                    <button
+                      type="button"
+                      className="btn btn-danger-solid btn-sm"
+                      disabled={deleting}
+                      onClick={async () => {
+                        setDeleting(true);
+                        setError('');
+                        try {
+                          await onDelete();
+                          onClose();
+                        } catch (err) {
+                          setError(err instanceof Error ? err.message : '移除成员失败');
+                          setConfirmDelete(false);
+                        } finally {
+                          setDeleting(false);
+                        }
+                      }}
+                    >
+                      <Trash2 size={13} />
+                      {deleting ? '移除中…' : '确认移除该成员'}
+                    </button>
+                    <button
+                      type="button"
+                      className="btn btn-sm"
+                      disabled={deleting}
+                      onClick={() => setConfirmDelete(false)}
+                    >
+                      取消
+                    </button>
+                  </>
+                ) : (
+                  <button
+                    type="button"
+                    className="btn btn-danger-ghost btn-sm"
+                    onClick={() => setConfirmDelete(true)}
+                  >
+                    <Trash2 size={13} />
+                    移除成员
+                  </button>
+                )}
+              </div>
+            )}
+            <div style={{ display: 'flex', gap: 8 }}>
+              <button type="button" className="btn" onClick={onClose}>
+                取消
+              </button>
+              <button
+                type="submit"
+                className="btn btn-ink"
+                disabled={saving || deleting || !name.trim()}
+              >
+                {saving ? '保存中...' : '保存修改'}
+              </button>
+            </div>
           </div>
         </form>
       </div>

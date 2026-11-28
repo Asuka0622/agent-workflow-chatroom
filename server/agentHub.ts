@@ -130,7 +130,55 @@ export class AgentHub extends EventEmitter {
         'utf8',
       );
     }
+
     return { baseDir, tasksDir, repliesDir, doneDir, stopFile };
+  }
+
+  ensureBridgeWatcherScript(agentId: string): {
+    baseDir: string;
+    tasksDir: string;
+    repliesDir: string;
+    stopFile: string;
+    watchPyPath: string;
+  } {
+    const dirs = this.ensureAgentBridgeDirs(agentId);
+    const watchPyPath = path.join(dirs.baseDir, 'watch.py');
+    if (!fs.existsSync(watchPyPath)) {
+      fs.writeFileSync(
+        watchPyPath,
+        [
+          'import glob, json, os, sys, time',
+          '',
+          'BASE = os.path.dirname(os.path.abspath(__file__))',
+          'TASKS = os.path.join(BASE, "tasks")',
+          'STOP = os.path.join(BASE, "STOP")',
+          'timeout = int(sys.argv[1]) if len(sys.argv) > 1 else 210',
+          'deadline = time.time() + max(5, min(600, timeout))',
+          '',
+          'while time.time() < deadline:',
+          '    if os.path.exists(STOP):',
+          '        print(json.dumps({"action": "stop", "reason": "STOP file detected"}, ensure_ascii=False))',
+          '        sys.exit(0)',
+          '    files = sorted(glob.glob(os.path.join(TASKS, "*.json")), key=os.path.getmtime)',
+          '    if files:',
+          '        with open(files[0], "r", encoding="utf-8") as f:',
+          '            task = json.load(f)',
+          '        print(json.dumps({"action": "handle_task", "taskFile": files[0], "task": task}, ensure_ascii=False))',
+          '        sys.exit(0)',
+          '    time.sleep(1.0)',
+          '',
+          'print(json.dumps({"action": "continue_wait"}, ensure_ascii=False))',
+          '',
+        ].join('\r\n'),
+        'utf8',
+      );
+    }
+    const entry = this.agents.get(agentId);
+    if (entry && !entry.info.lastBridgeAt) {
+      entry.info.lastBridgeAt = new Date().toISOString();
+      this.notify();
+    }
+    return { ...dirs, watchPyPath };
   }
 
   private writeBridgeTaskFile(agentId: string, task: AgentTask): string {
@@ -571,6 +619,12 @@ export class AgentHub extends EventEmitter {
       timeoutSec?: number;
       signal?: AbortSignal;
       onLog?: (chunk: string) => void;
+      onDispatched?: (meta: {
+        taskId: string;
+        taskFilePath: string;
+        replyMdPath: string;
+        directPrompt: string;
+      }) => void;
       onClaimed?: (via: 'wait' | 'pull' | 'progress' | 'bridge') => void;
       onUsage?: (usage: TokenUsage) => void;
     },
@@ -738,6 +792,28 @@ export class AgentHub extends EventEmitter {
       entry.info.busy = true;
       entry.info.activeTaskId = entry.activeTask.task.taskId;
       const taskFilePath = this.writeBridgeTaskFile(agentId, task);
+      const replyMdPath = path.join(
+        this.getAgentBridgeDir(agentId),
+        'replies',
+        `${task.taskId}.md`,
+      );
+      const historyBlock = payload.recentHistory?.trim()
+        ? `\n\n【最近群聊上下文参考】\n${payload.recentHistory.trim().slice(-2000)}`
+        : '';
+      const directPrompt = [
+        '请直接回答我下面的问题（仅本次单轮回答即可，不需要后台待命、也不需要轮询任何目录）：',
+        '',
+        task.prompt.trim(),
+        ...(historyBlock ? [historyBlock] : []),
+        '',
+        `回答完成后，请顺手把你的完整回复内容保存为 UTF-8 文件 \`${replyMdPath}\`（只需要这一次写文件，不需要循环；如果不方便写文件，直接把答案回复在对话里即可）。`,
+      ].join('\n');
+      options?.onDispatched?.({
+        taskId: task.taskId,
+        taskFilePath,
+        replyMdPath,
+        directPrompt,
+      });
       const hasListener = this.isListening(agentId);
       options?.onLog?.(
         hasListener

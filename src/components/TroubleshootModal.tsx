@@ -25,11 +25,9 @@ export function buildStandbyPrompt(agentId: string): string {
 
 export function buildFileBridgePrompt(agentId: string, name: string): string {
   const dir = `C:\\Users\\Administrator\\chatroom-bridge\\${agentId}`;
-  return `请作为 ${name} (${agentId}) 通过本机「文件夹桥接模式」接入我的多模型聊天室（无需访问本地端口，只需授权访问目录 \`${dir}\`）：
-1. 先检查是否存在 \`${dir}\\STOP\` 文件；若存在则立刻停止待命/跳过本轮；
-2. 扫描 \`${dir}\\tasks\\*.json\` 获取待办任务（每个 JSON 包含 \`taskId\`、\`prompt\`、\`recentHistory\`、\`repoPath\`）；
-3. 完成任务后，把回复写入 \`${dir}\\replies\\<taskId>.json\`，内容为 \`{"taskId":"<taskId>","content":"你的 Markdown 回复"}\`（也可直接写纯 Markdown 到 \`${dir}\\replies\\<taskId>.md\`）；
-4. 聊天室服务端 1 秒内会自动读取并提交回复、删除已完成的任务文件（防重复由服务端负责，无需你删除任务文件）。`;
+  return `你好 ${name}，请帮我做一次单次本地文件协作（不需要后台待命或循环轮询）：
+1. 读取 \`${dir}\\tasks\` 里最新的一份任务 JSON，先告诉我里面的问题内容；
+2. 由我确认后直接回答该问题，并把你的回复保存为 UTF-8 文件放到 \`${dir}\\replies\\<taskId>.md\`（只做这一次即可）。`;
 }
 
 export interface ErrorDiagnosis {

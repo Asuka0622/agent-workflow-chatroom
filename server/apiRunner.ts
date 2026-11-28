@@ -277,6 +277,100 @@ async function runGeminiApi(
   };
 }
 
+async function runAzureOpenAi(
+  provider: ProviderConfig,
+  prompt: string,
+  options: RunApiOptions,
+  signal: AbortSignal,
+): Promise<RunCliResult> {
+  const rawBase = normalizeBaseUrl(provider.apiBaseUrl || '', '');
+  const deployment = (provider.model || '').trim();
+  const apiKey = (provider.apiKey || '').trim();
+  if (!rawBase) {
+    throw new Error(
+      `Azure OpenAI 模型「${provider.shortName}」未填写 Endpoint（如 https://<resource>.openai.azure.com）`,
+    );
+  }
+  if (!apiKey) {
+    throw new Error(`Azure OpenAI 模型「${provider.shortName}」未填写 API Key`);
+  }
+
+  let url = rawBase;
+  if (!/\/chat\/completions(\?|$)/i.test(url)) {
+    if (!deployment) {
+      throw new Error(
+        `Azure OpenAI 模型「${provider.shortName}」未填写部署名（Deployment Name / 模型名称）`,
+      );
+    }
+    const [baseNoQuery, queryStr] = url.split('?');
+    const cleanBase = baseNoQuery.replace(/\/+$/, '');
+    const apiVersion =
+      new URLSearchParams(queryStr || '').get('api-version') || '2024-10-21';
+    url = `${cleanBase}/openai/deployments/${encodeURIComponent(deployment)}/chat/completions?api-version=${encodeURIComponent(apiVersion)}`;
+  }
+
+  const commandPreview = `POST ${url} (Azure deployment: ${deployment || 'inline'})`;
+  options.onLog?.(`[Azure OpenAI] 正在请求 ${url}...\n`);
+
+  const messages: Array<{ role: string; content: string }> = [];
+  if (provider.systemPrompt?.trim()) {
+    messages.push({ role: 'system', content: provider.systemPrompt.trim() });
+  }
+  messages.push({ role: 'user', content: prompt });
+
+  const reqBody: Record<string, unknown> = {
+    messages,
+    stream: false,
+  };
+  if (provider.thinkingLevel && provider.thinkingLevel !== 'default' && provider.thinkingLevel !== 'off') {
+    reqBody.reasoning_effort =
+      provider.thinkingLevel === 'max' ? 'xhigh' : provider.thinkingLevel === 'on' ? 'high' : provider.thinkingLevel;
+  }
+
+  const res = await fetch(url, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      'api-key': apiKey,
+    },
+    body: JSON.stringify(reqBody),
+    signal,
+  });
+
+  const rawText = await res.text();
+  if (!res.ok) {
+    throw new Error(`Azure OpenAI 请求失败 (${res.status})：${rawText.slice(0, 600)}`);
+  }
+
+  let data: {
+    choices?: Array<{ message?: { content?: string } }>;
+    usage?: { prompt_tokens?: number; completion_tokens?: number; total_tokens?: number };
+  };
+  try {
+    data = JSON.parse(rawText);
+  } catch {
+    throw new Error(`Azure OpenAI 返回非 JSON 内容：${rawText.slice(0, 400)}`);
+  }
+
+  const content = data.choices?.[0]?.message?.content?.trim() || '';
+  const usage: TokenUsage = normalizeTokenUsage(
+    data.usage,
+    { inputText: prompt, outputText: content },
+    'api',
+  );
+  if (data.usage) {
+    options.onLog?.(
+      `[Azure OpenAI] 完成（输入 ${usage.inputTokens} / 输出 ${usage.outputTokens} / 合计 ${usage.totalTokens} tokens）\n`,
+    );
+  }
+  return {
+    output: content || '（Azure OpenAI 返回空内容）',
+    exitCode: 0,
+    commandPreview,
+    usage,
+  };
+}
+
 export function isApiProvider(provider?: ProviderConfig): boolean {
   return Boolean(
     provider &&
@@ -301,6 +395,8 @@ export async function runProviderApi(
     switch (provider.connectionType) {
       case 'openai_api':
         return await runOpenAiCompatible(provider, prompt, options, controller.signal);
+      case 'azure_openai':
+        return await runAzureOpenAi(provider, prompt, options, controller.signal);
       case 'anthropic_api':
         return await runAnthropicApi(provider, prompt, options, controller.signal);
       case 'gemini_api':

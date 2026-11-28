@@ -156,6 +156,7 @@ Agent 零轮询协作命令:
   stop-wait [agentId]            远程通知正在待命的 Agent 立即退出等待
   reply [content]                提交任务回复 [--agent <id>] [--task <taskId>] [--file <path>] [--stdin]
   detect-cli <agentId>           探测并自动绑定该成员对应的本机官方 CLI
+  mcp                            以标准 Stdio MCP Server 桥接模式运行（供 Claude Desktop / Cursor 挂载）
 
 发消息与成员管理:
   send <message>                 发送群聊消息或启动板块流程
@@ -944,6 +945,78 @@ async function main(): Promise<void> {
       const res = await fetch(`${baseUrl.replace(/\/+$/, '')}/api/agent/skill`);
       process.stdout.write(await res.text());
     }
+    return;
+  }
+
+  // 14. mcp — Stdio JSON-RPC 2.0 MCP Server bridge forwarding to local POST /mcp
+  if (cmd === 'mcp') {
+    const mcpUrl = `${baseUrl.replace(/\/+$/, '')}/mcp`;
+    let buffer = '';
+    process.stdin.setEncoding('utf8');
+    const processLine = async (line: string) => {
+      const trimmed = line.trim();
+      if (!trimmed) return;
+      let parsed: { id?: string | number | null; method?: string } | null = null;
+      try {
+        parsed = JSON.parse(trimmed) as { id?: string | number | null; method?: string };
+      } catch {
+        process.stdout.write(
+          `${JSON.stringify({
+            jsonrpc: '2.0',
+            id: null,
+            error: { code: -32700, message: 'Parse error' },
+          })}\n`,
+        );
+        return;
+      }
+      try {
+        const res = await fetch(mcpUrl, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: trimmed,
+        });
+        if (res.status === 202 || res.status === 204) return;
+        const text = (await res.text()).trim();
+        if (text) {
+          process.stdout.write(`${text}\n`);
+        }
+      } catch (err) {
+        if (parsed && parsed.id !== undefined) {
+          process.stdout.write(
+            `${JSON.stringify({
+              jsonrpc: '2.0',
+              id: parsed.id,
+              error: {
+                code: -32000,
+                message: `无法连接本地聊天室 MCP 服务 (${mcpUrl}): ${err instanceof Error ? err.message : String(err)}`,
+              },
+            })}\n`,
+          );
+        }
+      }
+    };
+
+    await new Promise<void>((resolve) => {
+      let pending = Promise.resolve();
+      process.stdin.on('data', (chunk: string) => {
+        buffer += chunk;
+        let nl = buffer.indexOf('\n');
+        while (nl >= 0) {
+          const line = buffer.slice(0, nl);
+          buffer = buffer.slice(nl + 1);
+          pending = pending.then(() => processLine(line));
+          nl = buffer.indexOf('\n');
+        }
+      });
+      process.stdin.on('end', () => {
+        if (buffer.trim()) {
+          const rest = buffer;
+          buffer = '';
+          pending = pending.then(() => processLine(rest));
+        }
+        void pending.finally(resolve);
+      });
+    });
     return;
   }
 

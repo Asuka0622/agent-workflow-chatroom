@@ -62,6 +62,12 @@ export const api = {
       },
     ),
 
+  launchProviderTerminal: (command: string, title?: string, autoRun = true) =>
+    request<{ ok: boolean; launched: string; autoRun?: boolean }>('/api/providers/launch-terminal', {
+      method: 'POST',
+      body: JSON.stringify({ command, title, autoRun }),
+    }),
+
   getWorkflow: () => request<{ workflow: WorkflowDefinition }>('/api/workflow'),
 
   saveWorkflow: (workflow: WorkflowDefinition) =>
@@ -73,6 +79,27 @@ export const api = {
   resetWorkflow: () =>
     request<{ workflow: WorkflowDefinition }>('/api/workflow/reset', {
       method: 'POST',
+    }),
+
+  generateWorkflow: (
+    payload: {
+      prompt: string;
+      currentWorkflow?: WorkflowDefinition;
+      onlineMemberIds?: string[];
+      providerId?: string;
+      apply?: boolean;
+    },
+    signal?: AbortSignal,
+  ) =>
+    request<{
+      workflow: WorkflowDefinition;
+      generatedBy: string;
+      usedLlm: boolean;
+      fallbackReason?: string;
+    }>('/api/workflow/generate', {
+      method: 'POST',
+      body: JSON.stringify(payload),
+      signal,
     }),
 
   listWorkflowTemplates: () =>
@@ -143,6 +170,12 @@ export const api = {
     request<{ run: WorkflowRun }>(`/api/runs/${id}/abort`, {
       method: 'POST',
     }),
+
+  cancelMessage: (runId: string, msgId: string) =>
+    request<{ run: WorkflowRun }>(
+      `/api/runs/${encodeURIComponent(runId)}/messages/${encodeURIComponent(msgId)}/cancel`,
+      { method: 'POST' },
+    ),
 
   uploadFile: (
     id: string,
@@ -321,6 +354,28 @@ export const api = {
       method: 'POST',
     }),
 
+  createQuickBridgeAgent: (payload: { name: string; avatar?: string; roomId?: string }) =>
+    request<{
+      ok: boolean;
+      agent: ConnectedAgent;
+      bridgeDir: string;
+      tasksDir: string;
+      repliesDir: string;
+      watchPyPath: string;
+    }>('/api/agents/quick-bridge', {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    }),
+
+  submitAgentReply: (agentId: string, payload: { taskId?: string; content: string }) =>
+    request<{ ok: boolean; matchedTaskId?: string }>(
+      `/api/agent/${encodeURIComponent(agentId)}/reply`,
+      {
+        method: 'POST',
+        body: JSON.stringify(payload),
+      },
+    ),
+
   getUsage: () => request<{ usage: Record<string, MemberUsageRecord> }>('/api/usage'),
 
   updateMemberQuota: (memberId: string, quota: Partial<MemberQuotaConfig>) =>
@@ -358,6 +413,39 @@ export const api = {
     request<{ workbench: WorkbenchConfig }>('/api/workbench', {
       method: 'PUT',
       body: JSON.stringify({ workbench }),
+    }),
+
+  discoverLocalSkills: (cwd?: string, customDir?: string) => {
+    const params = new URLSearchParams();
+    if (cwd) params.set('cwd', cwd);
+    if (customDir) params.set('dir', customDir);
+    const qs = params.toString();
+    return request<{
+      skills: Array<{
+        key: string;
+        name: string;
+        description: string;
+        prompt: string;
+        trigger?: string;
+        source: string;
+        filePath: string;
+      }>;
+      scannedDirs: string[];
+    }>(`/api/workbench/skills/discover${qs ? `?${qs}` : ''}`);
+  },
+
+  importSkillsFromUrl: (url: string) =>
+    request<{
+      resolvedUrl: string;
+      skills: Array<{
+        name: string;
+        description: string;
+        prompt: string;
+        trigger?: string;
+      }>;
+    }>('/api/workbench/skills/import-url', {
+      method: 'POST',
+      body: JSON.stringify({ url }),
     }),
 
   testWorkbenchPlugin: (id: string, cwd?: string) =>
