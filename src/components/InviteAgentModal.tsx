@@ -20,6 +20,7 @@ import {
 } from 'lucide-react';
 import type { AgentTrigger, ConnectedAgent } from '../../shared/types';
 import { api } from '../api';
+import { useI18n } from '../i18n';
 import { MemberAvatar } from './MemberAvatar';
 
 interface InviteAgentModalProps {
@@ -49,6 +50,7 @@ export const InviteAgentModal: React.FC<InviteAgentModalProps> = ({
   onRenameAgent,
   onDeleteAgent,
 }) => {
+  const { tr } = useI18n();
   const [scenario, setScenario] = useState<ScenarioKey>('chat');
   const [joinMode, setJoinMode] = useState<'standby' | 'register'>('standby');
   const [mcpMode, setMcpMode] = useState<'http' | 'stdio'>('http');
@@ -251,16 +253,16 @@ export const InviteAgentModal: React.FC<InviteAgentModalProps> = ({
         <div className="modal-header">
           <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
             <UserPlus size={17} />
-            <h2>一键拉模型入群</h2>
+            <h2>{tr('一键拉模型入群', 'Invite AI Member to Room')}</h2>
           </div>
-          <button className="btn btn-sm" onClick={onClose} aria-label="关闭">
+          <button className="btn btn-sm" onClick={onClose} aria-label={tr('关闭', 'Close')}>
             <X size={15} />
           </button>
         </div>
 
         <div className="modal-body">
           {/* Step 1: Pick Scenario */}
-          <div className="invite-scenario-grid" role="tablist" aria-label="选择接入场景">
+          <div className="invite-scenario-grid" role="tablist" aria-label={tr('选择接入场景', 'Select connection mode')}>
             <button
               type="button"
               role="tab"
@@ -270,7 +272,7 @@ export const InviteAgentModal: React.FC<InviteAgentModalProps> = ({
             >
               <div className="isc-head">
                 <MessageSquare size={14} />
-                <strong>对话 / IDE 客户端</strong>
+                <strong>{tr('对话 / IDE 客户端', 'Chat / IDE Agent')}</strong>
               </div>
               <span>WorkBuddy · Cursor · Antigravity · Cline</span>
             </button>
@@ -284,9 +286,9 @@ export const InviteAgentModal: React.FC<InviteAgentModalProps> = ({
             >
               <div className="isc-head">
                 <FolderSync size={14} />
-                <strong>受限桌面端（文件桥接）</strong>
+                <strong>{tr('受限桌面端（文件桥接）', 'Sandboxed App (File Bridge)')}</strong>
               </div>
-              <span>AWS Quick 等无命令行但可读写目录</span>
+              <span>{tr('AWS Quick 等无命令行但可读写目录', 'Apps without shell that can read/write a folder')}</span>
             </button>
 
             <button
@@ -298,7 +300,7 @@ export const InviteAgentModal: React.FC<InviteAgentModalProps> = ({
             >
               <div className="isc-head">
                 <Plug size={14} />
-                <strong>MCP 客户端</strong>
+                <strong>{tr('MCP 客户端', 'MCP Client')}</strong>
               </div>
               <span>Claude Desktop · Cherry Studio · Cursor</span>
             </button>
@@ -308,21 +310,23 @@ export const InviteAgentModal: React.FC<InviteAgentModalProps> = ({
           {scenario === 'chat' && (
             <div className="invite-step-box">
               <div className="invite-step-head">
-                <strong style={{ fontSize: 12.5 }}>把下面 3 行直接发给对方，即可自动入群</strong>
+                <strong style={{ fontSize: 12.5 }}>
+                  {tr('把下面 3 行直接发给对方，即可自动入群', 'Paste these 3 lines to the agent to join automatically')}
+                </strong>
                 <div className="invite-mode-pills">
                   <button
                     type="button"
                     className={`member-quota-tab ${joinMode === 'standby' ? 'active' : ''}`}
                     onClick={() => setJoinMode('standby')}
                   >
-                    一步入群并秒回（推荐）
+                    {tr('一步入群并秒回（推荐）', 'Join & Standby (Recommended)')}
                   </button>
                   <button
                     type="button"
                     className={`member-quota-tab ${joinMode === 'register' ? 'active' : ''}`}
                     onClick={() => setJoinMode('register')}
                   >
-                    仅登记入群
+                    {tr('仅登记入群', 'Register Only')}
                   </button>
                 </div>
               </div>
@@ -333,7 +337,10 @@ export const InviteAgentModal: React.FC<InviteAgentModalProps> = ({
 
               <div className="invite-primary-action-row">
                 <span className="invite-micro-hint">
-                  入群时会自动探测本机 CLI（Claude / Gemini / Codex / Ollama），没有则走 0 Token 静默待命。
+                  {tr(
+                    '入群时会自动探测本机 CLI（Claude / Gemini / Codex / Ollama），没有则走 0 Token 静默待命。',
+                    'Auto-detects local CLIs (Claude / agy / Codex / Ollama); otherwise uses 0-token silent standby.',
+                  )}
                 </span>
                 <button
                   type="button"
@@ -341,7 +348,9 @@ export const InviteAgentModal: React.FC<InviteAgentModalProps> = ({
                   onClick={() => void handleCopyText('chat', chatPrompt)}
                 >
                   {copiedKey === 'chat' ? <Check size={14} /> : <Copy size={14} />}
-                  {copiedKey === 'chat' ? '已复制，去粘贴发送' : '一键复制发给对方'}
+                  {copiedKey === 'chat'
+                    ? tr('已复制，去粘贴发送', 'Copied — Paste & Send')
+                    : tr('一键复制发给对方', 'Copy Invite Prompt')}
                 </button>
               </div>
             </div>
@@ -351,7 +360,10 @@ export const InviteAgentModal: React.FC<InviteAgentModalProps> = ({
             <div className="invite-step-box">
               <div className="invite-step-head">
                 <strong style={{ fontSize: 12.5 }}>
-                  专为 AWS Quick 等逐轮对话桌面端设计（单轮直答 + 自动回执，不触发安全拦截）
+                  {tr(
+                    '专为 AWS Quick 等逐轮对话桌面端设计（单轮直答 + 自动回执，不触发安全拦截）',
+                    'Designed for turn-based desktop apps (one-shot prompt + file reply, zero polling)',
+                  )}
                 </strong>
               </div>
 
@@ -361,7 +373,7 @@ export const InviteAgentModal: React.FC<InviteAgentModalProps> = ({
                   style={{ flex: 1 }}
                   value={bridgeName}
                   onChange={(e) => setBridgeName(e.target.value)}
-                  placeholder="给对方起个名字，如 AWS Quick / 企业内网助手"
+                  placeholder={tr('给对方起个名字，如 AWS Quick / 企业内网助手', 'Name this member, e.g. AWS Quick')}
                   onKeyDown={(e) => {
                     if (e.key === 'Enter' && !bridgeBusy) {
                       void handleQuickBridge();
@@ -376,7 +388,7 @@ export const InviteAgentModal: React.FC<InviteAgentModalProps> = ({
                   onClick={() => void handleQuickBridge()}
                 >
                   {bridgeBusy ? <Loader2 size={14} className="spin" /> : <FolderSync size={14} />}
-                  {bridgeBusy ? '登记中…' : '一键登记该成员'}
+                  {bridgeBusy ? tr('登记中…', 'Registering…') : tr('一键登记该成员', 'Register Member')}
                 </button>
               </div>
 
@@ -447,21 +459,23 @@ export const InviteAgentModal: React.FC<InviteAgentModalProps> = ({
           {scenario === 'mcp' && (
             <div className="invite-step-box">
               <div className="invite-step-head">
-                <strong style={{ fontSize: 12.5 }}>内置标准 MCP Server，任选一种粘贴到客户端</strong>
+                <strong style={{ fontSize: 12.5 }}>
+                  {tr('内置标准 MCP Server，任选一种粘贴到客户端', 'Built-in MCP Server — paste either config into your client')}
+                </strong>
                 <div className="invite-mode-pills">
                   <button
                     type="button"
                     className={`member-quota-tab ${mcpMode === 'http' ? 'active' : ''}`}
                     onClick={() => setMcpMode('http')}
                   >
-                    Streamable HTTP（推荐）
+                    {tr('Streamable HTTP（推荐）', 'Streamable HTTP (Recommended)')}
                   </button>
                   <button
                     type="button"
                     className={`member-quota-tab ${mcpMode === 'stdio' ? 'active' : ''}`}
                     onClick={() => setMcpMode('stdio')}
                   >
-                    Stdio（Claude Desktop）
+                    Stdio (Claude Desktop)
                   </button>
                 </div>
               </div>
@@ -480,7 +494,7 @@ export const InviteAgentModal: React.FC<InviteAgentModalProps> = ({
                     }}
                   >
                     <span>
-                      端点地址：<code>{mcpHttpUrl}</code>
+                      {tr('端点地址：', 'Endpoint: ')}<code>{mcpHttpUrl}</code>
                     </span>
                     <button
                       type="button"
@@ -488,7 +502,7 @@ export const InviteAgentModal: React.FC<InviteAgentModalProps> = ({
                       onClick={() => void handleCopyText('mcp_url', mcpHttpUrl)}
                     >
                       {copiedKey === 'mcp_url' ? <Check size={12} /> : <Copy size={12} />}
-                      {copiedKey === 'mcp_url' ? '已复制地址' : '复制地址'}
+                      {copiedKey === 'mcp_url' ? tr('已复制地址', 'Copied') : tr('复制地址', 'Copy URL')}
                     </button>
                   </div>
                   <pre className="invite-prompt-box" style={{ maxHeight: 132 }}>
@@ -496,7 +510,10 @@ export const InviteAgentModal: React.FC<InviteAgentModalProps> = ({
                   </pre>
                   <div className="invite-primary-action-row">
                     <span className="invite-micro-hint">
-                      挂载后自动提供 6 个群聊工具，直接对它说「加入我的群聊」即可。
+                      {tr(
+                        '挂载后自动提供 6 个群聊工具，直接对它说「加入我的群聊」即可。',
+                        'Exposes 6 chatroom MCP tools — simply tell the client to join your chatroom.',
+                      )}
                     </span>
                     <button
                       type="button"
@@ -504,7 +521,7 @@ export const InviteAgentModal: React.FC<InviteAgentModalProps> = ({
                       onClick={() => void handleCopyText('mcp_http', mcpHttpConfig)}
                     >
                       {copiedKey === 'mcp_http' ? <Check size={14} /> : <Copy size={14} />}
-                      {copiedKey === 'mcp_http' ? '已复制 JSON' : '一键复制 JSON 配置'}
+                      {copiedKey === 'mcp_http' ? tr('已复制 JSON', 'Copied JSON') : tr('一键复制 JSON 配置', 'Copy JSON Config')}
                     </button>
                   </div>
                 </>
@@ -515,7 +532,7 @@ export const InviteAgentModal: React.FC<InviteAgentModalProps> = ({
                   </pre>
                   <div className="invite-primary-action-row">
                     <span className="invite-micro-hint">
-                      适用于 Claude Desktop / Claude Code 等经典 Stdio MCP 宿主。
+                      {tr('适用于 Claude Desktop / Claude Code 等经典 Stdio MCP 宿主。', 'For classic Stdio MCP hosts like Claude Desktop / Claude Code.')}
                     </span>
                     <button
                       type="button"
@@ -523,7 +540,7 @@ export const InviteAgentModal: React.FC<InviteAgentModalProps> = ({
                       onClick={() => void handleCopyText('mcp_stdio', mcpStdioConfig)}
                     >
                       {copiedKey === 'mcp_stdio' ? <Check size={14} /> : <Copy size={14} />}
-                      {copiedKey === 'mcp_stdio' ? '已复制 JSON' : '一键复制 JSON 配置'}
+                      {copiedKey === 'mcp_stdio' ? tr('已复制 JSON', 'Copied JSON') : tr('一键复制 JSON 配置', 'Copy JSON Config')}
                     </button>
                   </div>
                 </>
@@ -536,14 +553,17 @@ export const InviteAgentModal: React.FC<InviteAgentModalProps> = ({
             <div className="invite-pool-banner">
               <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
                 <Sparkles size={13} />
-                已有 API Key（DeepSeek / OpenAI / Azure / Claude / Gemini）或本机订阅 CLI？
+                {tr(
+                  '已有 API Key（DeepSeek / OpenAI / Azure / Claude / Gemini）或本机订阅 CLI？',
+                  'Already have an API Key (DeepSeek / OpenAI / Claude / Gemini) or local CLI?',
+                )}
               </span>
               <button
                 type="button"
                 className="btn btn-sm"
                 onClick={onOpenProviders}
               >
-                去模型池一键开启
+                {tr('去模型池一键开启', 'Open Model Pool')}
                 <ArrowRight size={12} />
               </button>
             </div>
@@ -560,7 +580,10 @@ export const InviteAgentModal: React.FC<InviteAgentModalProps> = ({
               {showManage ? <ChevronDown size={14} /> : <ChevronRight size={14} />}
               <Link2 size={13} />
               <span>
-                已接入成员管理（{onlineCount}/{agents.length} 就绪 · 改名 / 绑定 CLI / 移除）
+                {tr(
+                  `已接入成员管理（${onlineCount}/${agents.length} 就绪 · 改名 / 绑定 CLI / 移除）`,
+                  `Connected Members (${onlineCount}/${agents.length} ready · Rename / Bind CLI / Remove)`,
+                )}
               </span>
             </button>
 

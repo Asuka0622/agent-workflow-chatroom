@@ -88,7 +88,8 @@ import { WorkflowTemplateCanvas } from './components/WorkflowTemplateCanvas';
 import { WorkspacePane } from './components/WorkspacePane';
 import { AmbientStage } from './components/AmbientStage';
 import { BRAND } from './brand';
-import { RinneMascot, RINNE_LINES, type RinneState } from './components/RinneMascot';
+import { RinneMascot, RINNE_LINES, RINNE_LINES_EN, type RinneState } from './components/RinneMascot';
+import { LOCALE_OPTIONS, useI18n } from './i18n';
 import { JournalCover, type CoverIssue, type CoverStep } from './components/JournalCover';
 import {
   TroubleshootModal,
@@ -164,6 +165,7 @@ function formatTokenTooltip(u: TokenUsage): string {
 }
 
 export const App: React.FC = () => {
+  const { locale, isEn, setLocale, tr, tl } = useI18n();
   const [theme, setTheme] = useState<'light' | 'dark'>(() => {
     const saved = localStorage.getItem('ag_chat_theme');
     return saved === 'dark' ? 'dark' : 'light';
@@ -1847,8 +1849,10 @@ export const App: React.FC = () => {
               : 'idle';
   const rinneLine =
     rinneState === 'working' && workingCount > 0
-      ? `正在协作中…（${workingCount} 位成员工作中）`
-      : RINNE_LINES[rinneState];
+      ? isEn
+        ? `Collaborating… (${workingCount} active)`
+        : `正在协作中…（${workingCount} 位成员工作中）`
+      : (isEn ? RINNE_LINES_EN : RINNE_LINES)[rinneState];
 
   // Issue numbers: rooms in creation order, oldest = No.01
   const issueNoById = new Map(
@@ -1861,20 +1865,29 @@ export const App: React.FC = () => {
     const ordered = [...runs].sort((a, b) => a.createdAt.localeCompare(b.createdAt));
     const idx = activeRun ? ordered.findIndex((r) => r.id === activeRun.id) : -1;
     const repo = (activeRun?.repoPath || repoPath || '').replace(/[\\/]+$/, '');
-    const statusLabel: Record<string, string> = {
-      idle: '待启动',
-      running: '进行中',
-      waiting_approval: '等你拍板',
-      completed: '已完成',
-      failed: '出错',
-      aborted: '已终止',
-    };
+    const statusLabel: Record<string, string> = isEn
+      ? {
+          idle: 'Ready',
+          running: 'Running',
+          waiting_approval: 'Needs Approval',
+          completed: 'Completed',
+          failed: 'Error',
+          aborted: 'Stopped',
+        }
+      : {
+          idle: '待启动',
+          running: '进行中',
+          waiting_approval: '等你拍板',
+          completed: '已完成',
+          failed: '出错',
+          aborted: '已终止',
+        };
     return {
       no: idx >= 0 ? idx + 1 : ordered.length + 1,
-      title: activeRun?.title || '新协作会话',
+      title: tl(activeRun?.title) || tr('新协作会话', 'New Session'),
       createdAt: activeRun?.createdAt,
       workspace: repo.split(/[\\/]/).pop() || 'workspace',
-      statusLabel: statusLabel[activeRun?.status || 'idle'] || '待启动',
+      statusLabel: statusLabel[activeRun?.status || 'idle'] || tr('待启动', 'Ready'),
       messageCount: realMessages.length,
       requirement: activeRun?.requirement,
     };
@@ -1923,7 +1936,7 @@ export const App: React.FC = () => {
           <div className="studio-sidebar-top">
             <button className="studio-new-thread" onClick={handleNewRoom}>
               <Plus size={15} />
-              <span>新建协作会话</span>
+              <span>{tr('新建协作会话', 'New Session')}</span>
             </button>
           </div>
         </div>
@@ -1937,12 +1950,16 @@ export const App: React.FC = () => {
                 type="button"
                 className="sb-section-toggle"
                 onClick={() => toggleSidebarSection('workbench')}
-                title={sidebarSections.workbench ? '折叠为单行快捷图标栏' : '展开工作台导航列表'}
+                title={
+                  sidebarSections.workbench
+                    ? tr('折叠为单行快捷图标栏', 'Collapse to compact icon dock')
+                    : tr('展开工作台导航列表', 'Expand workbench menu')
+                }
               >
                 <span className={`sb-section-chev ${sidebarSections.workbench ? 'is-open' : ''}`}>
                   <ChevronRight size={12} />
                 </span>
-                <span>工作台</span>
+                <span>{tr('工作台', 'Workbench')}</span>
               </button>
               <span className="sb-section-meta">06</span>
             </div>
@@ -1956,13 +1973,16 @@ export const App: React.FC = () => {
                     if (showProjectWorkspace) closeRightSplitPane();
                     else openProjectWorkspace();
                   }}
-                  title="打开本地项目工作区（浏览文件树、查看/编辑代码、Git Diff 与一键引用到对话）"
+                  title={tr(
+                    '打开本地项目工作区（浏览文件树、查看/编辑代码、Git Diff 与一键引用到对话）',
+                    'Open local workspace (files, code editor, Git diff & cite to chat)',
+                  )}
                 >
                   <span className="wb-nav-idx">01</span>
                   <FolderOpen size={13} />
-                  <span className="wb-nav-label">工作区</span>
+                  <span className="wb-nav-label">{tr('工作区', 'Workspace')}</span>
                   <span className="wb-nav-count">
-                    {repoPath.split(/[/\\]/).filter(Boolean).pop() || '目录'}
+                    {repoPath.split(/[/\\]/).filter(Boolean).pop() || tr('目录', 'Dir')}
                   </span>
                 </button>
                 <button
@@ -1972,24 +1992,34 @@ export const App: React.FC = () => {
                     if (showCanvas) closeRightSplitPane();
                     else openWorkflowCanvas();
                   }}
-                  title="以分屏画布形式可视化编排工作流模板与实时产出"
+                  title={tr(
+                    '以分屏画布形式可视化编排工作流模板与实时产出',
+                    'Visual split-pane workflow canvas and live artifacts',
+                  )}
                 >
                   <span className="wb-nav-idx">02</span>
                   <Layers size={13} />
-                  <span className="wb-nav-label">工作流画布</span>
+                  <span className="wb-nav-label">{tr('工作流画布', 'Workflow Canvas')}</span>
                   <span className="wb-nav-count">
-                    {workflow ? `${workflow.nodes.length}步` : '画布'}
+                    {workflow
+                      ? isEn
+                        ? `${workflow.nodes.length} steps`
+                        : `${workflow.nodes.length}步`
+                      : tr('画布', 'Canvas')}
                   </span>
                 </button>
                 <button
                   type="button"
                   className={`wb-nav-btn ${workbenchTab === 'skills' ? 'active' : ''}`}
                   onClick={() => setWorkbenchTab('skills')}
-                  title="管理可复用提示词技能与全局自动注入规则（输入框打 / 也可唤起）"
+                  title={tr(
+                    '管理可复用提示词技能与全局自动注入规则（输入框打 / 也可唤起）',
+                    'Manage reusable prompt skills & auto-inject rules (type / in composer)',
+                  )}
                 >
                   <span className="wb-nav-idx">03</span>
                   <Sparkles size={13} />
-                  <span className="wb-nav-label">技能 Skills</span>
+                  <span className="wb-nav-label">{tr('技能 Skills', 'Skills')}</span>
                   <span className="wb-nav-count">
                     {workbench.skills.filter((s) => s.enabled).length}
                   </span>
@@ -1998,11 +2028,14 @@ export const App: React.FC = () => {
                   type="button"
                   className={`wb-nav-btn ${workbenchTab === 'plugins' ? 'active' : ''}`}
                   onClick={() => setWorkbenchTab('plugins')}
-                  title="接入与检测本地 MCP Server、CLI 工具或 Webhook 插件"
+                  title={tr(
+                    '接入与检测本地 MCP Server、CLI 工具或 Webhook 插件',
+                    'Manage local MCP servers, CLI tools, and Webhook plugins',
+                  )}
                 >
                   <span className="wb-nav-idx">04</span>
                   <Blocks size={13} />
-                  <span className="wb-nav-label">插件 / MCP</span>
+                  <span className="wb-nav-label">{tr('插件 / MCP', 'Plugins / MCP')}</span>
                   <span className="wb-nav-count">
                     {workbench.plugins.filter((p) => p.enabled).length}
                   </span>
@@ -2011,11 +2044,14 @@ export const App: React.FC = () => {
                   type="button"
                   className={`wb-nav-btn ${workbenchTab === 'knowledge' ? 'active' : ''}`}
                   onClick={() => setWorkbenchTab('knowledge')}
-                  title="跨会话共享的项目规范与全局参考资料库"
+                  title={tr(
+                    '跨会话共享的项目规范与全局参考资料库',
+                    'Shared project conventions & global knowledge base',
+                  )}
                 >
                   <span className="wb-nav-idx">05</span>
                   <BookOpen size={13} />
-                  <span className="wb-nav-label">全局资料库</span>
+                  <span className="wb-nav-label">{tr('全局资料库', 'Knowledge Base')}</span>
                   <span className="wb-nav-count">
                     {workbench.knowledge.filter((k) => k.pinned).length}
                   </span>
@@ -2024,14 +2060,19 @@ export const App: React.FC = () => {
                   type="button"
                   className={`wb-nav-btn ${workbenchTab === 'automation' ? 'active' : ''}`}
                   onClick={() => setWorkbenchTab('automation')}
-                  title="协作快捷模板与本地定时自动化任务"
+                  title={tr(
+                    '协作快捷模板与本地定时自动化任务',
+                    'Quick prompt templates & local scheduled automations',
+                  )}
                 >
                   <span className="wb-nav-idx">06</span>
                   <Clock size={13} />
-                  <span className="wb-nav-label">模板与定时</span>
+                  <span className="wb-nav-label">{tr('模板与定时', 'Templates & Cron')}</span>
                   <span className="wb-nav-count">
                     {workbench.schedules.some((s) => s.enabled)
-                      ? `${workbench.schedules.filter((s) => s.enabled).length}运行`
+                      ? isEn
+                        ? `${workbench.schedules.filter((s) => s.enabled).length} active`
+                        : `${workbench.schedules.filter((s) => s.enabled).length}运行`
                       : workbench.templates.length}
                   </span>
                 </button>
@@ -2041,7 +2082,7 @@ export const App: React.FC = () => {
                 <button
                   type="button"
                   className={`wb-dock-btn ${showProjectWorkspace ? 'active' : ''}`}
-                  title={`01 工作区 (${repoPath.split(/[/\\]/).filter(Boolean).pop() || '目录'})`}
+                  title={`01 ${tr('工作区', 'Workspace')} (${repoPath.split(/[/\\]/).filter(Boolean).pop() || tr('目录', 'Dir')})`}
                   onClick={() => (showProjectWorkspace ? closeRightSplitPane() : openProjectWorkspace())}
                 >
                   <FolderOpen size={14} />
@@ -2049,7 +2090,7 @@ export const App: React.FC = () => {
                 <button
                   type="button"
                   className={`wb-dock-btn ${showCanvas ? 'active' : ''}`}
-                  title="02 工作流画布"
+                  title={`02 ${tr('工作流画布', 'Workflow Canvas')}`}
                   onClick={() => (showCanvas ? closeRightSplitPane() : openWorkflowCanvas())}
                 >
                   <Layers size={14} />
@@ -2057,7 +2098,7 @@ export const App: React.FC = () => {
                 <button
                   type="button"
                   className={`wb-dock-btn ${workbenchTab === 'skills' ? 'active' : ''}`}
-                  title="03 技能 Skills"
+                  title={`03 ${tr('技能 Skills', 'Skills')}`}
                   onClick={() => setWorkbenchTab('skills')}
                 >
                   <Sparkles size={14} />
@@ -2065,7 +2106,7 @@ export const App: React.FC = () => {
                 <button
                   type="button"
                   className={`wb-dock-btn ${workbenchTab === 'plugins' ? 'active' : ''}`}
-                  title="04 插件 / MCP"
+                  title={`04 ${tr('插件 / MCP', 'Plugins / MCP')}`}
                   onClick={() => setWorkbenchTab('plugins')}
                 >
                   <Blocks size={14} />
@@ -2073,7 +2114,7 @@ export const App: React.FC = () => {
                 <button
                   type="button"
                   className={`wb-dock-btn ${workbenchTab === 'knowledge' ? 'active' : ''}`}
-                  title="05 全局资料库"
+                  title={`05 ${tr('全局资料库', 'Knowledge Base')}`}
                   onClick={() => setWorkbenchTab('knowledge')}
                 >
                   <BookOpen size={14} />
@@ -2081,7 +2122,7 @@ export const App: React.FC = () => {
                 <button
                   type="button"
                   className={`wb-dock-btn ${workbenchTab === 'automation' ? 'active' : ''}`}
-                  title="06 模板与定时"
+                  title={`06 ${tr('模板与定时', 'Templates & Cron')}`}
                   onClick={() => setWorkbenchTab('automation')}
                 >
                   <Clock size={14} />
@@ -2101,13 +2142,13 @@ export const App: React.FC = () => {
                 <span className={`sb-section-chev ${sidebarSections.threads ? 'is-open' : ''}`}>
                   <ChevronRight size={12} />
                 </span>
-                <span>会话</span>
+                <span>{tr('会话', 'Sessions')}</span>
                 <span className="sb-section-count">{runs.length}</span>
               </button>
               <button
                 type="button"
                 className="mini-icon-btn"
-                title="新建协作会话"
+                title={tr('新建协作会话', 'New Session')}
                 onClick={handleNewRoom}
               >
                 <Plus size={12} />
@@ -2157,16 +2198,21 @@ export const App: React.FC = () => {
                 <span className={`sb-section-chev ${sidebarSections.members ? 'is-open' : ''}`}>
                   <ChevronRight size={12} />
                 </span>
-                <span>成员</span>
+                <span>{tr('成员', 'Members')}</span>
                 {totalConnectedCount > 0 && (
-                  <span className="sb-section-count">{totalConnectedCount}在线</span>
+                  <span className="sb-section-count">
+                    {isEn ? `${totalConnectedCount} online` : `${totalConnectedCount}在线`}
+                  </span>
                 )}
               </button>
               <div style={{ display: 'inline-flex', alignItems: 'center', gap: 2 }}>
                 <button
                   type="button"
                   className="mini-icon-btn"
-                  title="连接诊断与常见问题解决（心跳待命 / 掉线 / 报错排障）"
+                  title={tr(
+                    '连接诊断与常见问题解决（心跳待命 / 掉线 / 报错排障）',
+                    'Diagnostics & Troubleshooting',
+                  )}
                   onClick={() => setShowTroubleshoot(true)}
                 >
                   <Wrench size={12} />
@@ -2174,7 +2220,7 @@ export const App: React.FC = () => {
                 <button
                   type="button"
                   className="mini-icon-btn"
-                  title="邀请外部 Agent 入群"
+                  title={tr('邀请外部 Agent 入群', 'Invite External Agent')}
                   onClick={() => setShowInvite(true)}
                 >
                   <UserPlus size={13} />
@@ -2190,7 +2236,7 @@ export const App: React.FC = () => {
                       key={m.id}
                       type="button"
                       className={`member-compact-btn ${selectedTargets.includes(m.id) ? 'active' : ''}`}
-                      title={`${m.name}（${m.listening ? '⚡ 监听待命' : m.bridgeActive ? '📁 文件桥接' : m.presence === 'working' ? '工作中' : m.presence === 'offline' ? '离线' : '在线 · 空闲'}）· 点击 @点名`}
+                      title={`${m.name} (${m.listening ? tr('⚡ 监听待命', '⚡ Listening') : m.bridgeActive ? tr('📁 文件桥接', '📁 File-Bridge') : m.presence === 'working' ? tr('工作中', 'Working') : m.presence === 'offline' ? tr('离线', 'Offline') : tr('在线 · 空闲', 'Online · Idle')})`}
                       onClick={() => {
                         if (m.presence !== 'offline') mentionMemberQuick(m.id, m.name);
                       }}
@@ -2214,17 +2260,17 @@ export const App: React.FC = () => {
                     {workingCount > 0 && (
                       <span className="status-sum-chip is-working">
                         <span className="presence-dot working" />
-                        {workingCount} 工作中
+                        {isEn ? `${workingCount} working` : `${workingCount} 工作中`}
                       </span>
                     )}
                     <span className="status-sum-chip is-idle">
                       <span className="presence-dot idle" />
-                      {idleCount} 空闲
+                      {isEn ? `${idleCount} idle` : `${idleCount} 空闲`}
                     </span>
                     {offlineCount > 0 && (
                       <span className="status-sum-chip is-offline">
                         <span className="presence-dot offline" />
-                        {offlineCount} 离线
+                        {isEn ? `${offlineCount} offline` : `${offlineCount} 离线`}
                       </span>
                     )}
                   </div>
@@ -2233,13 +2279,13 @@ export const App: React.FC = () => {
                 <div className="studio-member-list">
                   {sidebarMembers.length === 0 ? (
                     <div className="studio-member-empty">
-                      <span>暂无已接入成员</span>
+                      <span>{tr('暂无已接入成员', 'No connected members yet')}</span>
                       <button
                         type="button"
                         className="empty-invite-link"
                         onClick={() => setShowInvite(true)}
                       >
-                        + 邀请模型入群
+                        {tr('+ 邀请模型入群', '+ Invite Agent')}
                       </button>
                     </div>
                   ) : (
@@ -2261,14 +2307,14 @@ export const App: React.FC = () => {
                         });
                       };
                       const statusLabel = isWorking
-                        ? '工作中'
+                        ? tr('工作中', 'Working')
                         : isOffline
-                          ? '离线'
+                          ? tr('离线', 'Offline')
                           : m.listening
-                            ? '⚡ 监听待命'
+                            ? tr('⚡ 监听待命', '⚡ Listening')
                             : m.bridgeActive
-                              ? '📁 文件桥接'
-                              : '在线 · 空闲';
+                              ? tr('📁 文件桥接', '📁 File-Bridge')
+                              : tr('在线 · 空闲', 'Online · Idle');
                       const isExpanded = expandedMemberId === m.id;
                       const usageRec = memberUsage[m.id];
                       const q = usageRec?.quota;
@@ -2403,7 +2449,7 @@ export const App: React.FC = () => {
                                       });
                                     }}
                                   >
-                                    停等
+                                    {tr('停等', 'Stop')}
                                   </button>
                                 )}
                                 {lvl !== 'default' && !isOffline && (
@@ -2414,7 +2460,7 @@ export const App: React.FC = () => {
                             <button
                               type="button"
                               className="member-edit-btn"
-                              title="编辑名称、头像与配额设置"
+                              title={tr('编辑名称、头像与配额设置', 'Edit profile, avatar & quota')}
                               onClick={openProfile}
                             >
                               <Pencil size={11} />
@@ -2427,17 +2473,17 @@ export const App: React.FC = () => {
                               <div className="mqc-meta">{m.subtitle}</div>
                               <div className="mqc-stats">
                                 <div className="mqc-stat-row">
-                                  <span className="mqc-label">累计消耗</span>
+                                  <span className="mqc-label">{tr('累计消耗', 'Usage')}</span>
                                   <span className="mqc-val">
                                     {usageRec && usageRec.totalTokens > 0
-                                      ? `${(usageRec.exactTokens || 0) === 0 ? '~' : ''}${formatCompactTokens(usageRec.totalTokens)} tok · ${usageRec.calls}次`
-                                      : '暂无记录'}
+                                      ? `${(usageRec.exactTokens || 0) === 0 ? '~' : ''}${formatCompactTokens(usageRec.totalTokens)} tok · ${usageRec.calls}${tr('次', ' calls')}`
+                                      : tr('暂无记录', 'No usage yet')}
                                   </span>
                                 </div>
                                 <div className="mqc-stat-row">
-                                  <span className="mqc-label">剩余用量</span>
+                                  <span className="mqc-label">{tr('剩余用量', 'Quota Left')}</span>
                                   <span className={`mqc-val ${quotaSummary ? 'is-accent' : 'is-muted'}`}>
-                                    {quotaSummary ? quotaSummary.text : '未校准'}
+                                    {quotaSummary ? quotaSummary.text : tr('未校准', 'Not set')}
                                   </span>
                                 </div>
                                 {quotaSummary && quotaSummary.usedPct !== undefined && quotaSummary.remainPct !== undefined && (
@@ -2515,7 +2561,7 @@ export const App: React.FC = () => {
             onClick={() => setShowInvite(true)}
           >
             <UserPlus size={14} />
-            <span>邀请模型入群</span>
+            <span>{tr('邀请模型入群', 'Invite Agent')}</span>
           </button>
           <button
             type="button"
@@ -2523,7 +2569,7 @@ export const App: React.FC = () => {
             onClick={() => setShowProviders(true)}
           >
             <Settings2 size={14} />
-            <span>模型池（订阅 / API）</span>
+            <span>{tr('模型池（订阅 / API）', 'Model Pool (CLI / API)')}</span>
           </button>
         </div>
       </aside>
@@ -2615,10 +2661,38 @@ export const App: React.FC = () => {
           </div>
 
           <div className="studio-topbar-right">
+            <div
+              className="studio-lang-switch"
+              role="group"
+              aria-label={tr('语言切换', 'Language Switch')}
+              title={tr('切换界面语言（简体中文 / English）', 'Switch UI Language (简体中文 / English)')}
+            >
+              {LOCALE_OPTIONS.map((opt) => (
+                <button
+                  key={opt.code}
+                  type="button"
+                  className={`studio-lang-btn ${locale === opt.code ? 'active' : ''}`}
+                  aria-pressed={locale === opt.code}
+                  onClick={() => {
+                    if (locale !== opt.code) {
+                      setLocale(opt.code);
+                      flash(opt.code === 'en' ? 'Switched to English' : '已切换为简体中文');
+                    }
+                  }}
+                >
+                  {opt.short}
+                </button>
+              ))}
+            </div>
+
             <button
               type="button"
               className="studio-icon-btn"
-              title={theme === 'dark' ? '切换为浅色模式' : '切换为深色模式'}
+              title={
+                theme === 'dark'
+                  ? tr('切换为浅色模式', 'Switch to Light Mode')
+                  : tr('切换为深色模式', 'Switch to Dark Mode')
+              }
               onClick={() => setTheme((t) => (t === 'dark' ? 'light' : 'dark'))}
             >
               {theme === 'dark' ? <Sun size={15} /> : <Moon size={15} />}
@@ -2627,11 +2701,11 @@ export const App: React.FC = () => {
             <button
               type="button"
               className={`studio-icon-btn ${showRinne ? 'active' : ''}`}
-              title={showRinne ? '隐藏看板娘' : '显示看板娘'}
+              title={showRinne ? tr('隐藏看板娘', 'Hide Mascot Rinne') : tr('显示看板娘', 'Show Mascot Rinne')}
               aria-pressed={showRinne}
               onClick={() => {
                 setShowRinne((v) => !v);
-                flash(showRinne ? '看板娘已隐藏' : '看板娘已显示');
+                flash(showRinne ? tr('看板娘已隐藏', 'Mascot hidden') : tr('看板娘已显示', 'Mascot shown'));
               }}
             >
               {showRinne ? <UserRound size={15} /> : <UserRoundX size={15} />}
@@ -2640,7 +2714,7 @@ export const App: React.FC = () => {
             <button
               type="button"
               className={`studio-canvas-toggle ${showProjectWorkspace ? 'active' : ''}`}
-              title={`打开 / 收起本地项目工作区：${repoPath}`}
+              title={`${tr('打开 / 收起本地项目工作区', 'Toggle Local Workspace')}: ${repoPath}`}
               onClick={() => {
                 if (showProjectWorkspace) {
                   closeRightSplitPane();
@@ -2650,13 +2724,13 @@ export const App: React.FC = () => {
               }}
             >
               <FolderOpen size={13} />
-              <span>工作区</span>
+              <span>{tr('工作区', 'Workspace')}</span>
             </button>
 
             <button
               type="button"
               className={`studio-canvas-toggle ${showCanvas ? 'active' : ''}`}
-              title="打开 / 收起可视化工作流画布（支持分屏拖拽与全屏）"
+              title={tr('打开 / 收起可视化工作流画布（支持分屏拖拽与全屏）', 'Toggle Visual Workflow Canvas')}
               onClick={() => {
                 if (showCanvas) {
                   closeRightSplitPane();
@@ -2666,13 +2740,13 @@ export const App: React.FC = () => {
               }}
             >
               <Layers size={13} />
-              <span>画布</span>
+              <span>{tr('画布', 'Canvas')}</span>
             </button>
 
             <button
               type="button"
               className={`studio-icon-btn ${showWorkspace ? 'active' : ''}`}
-              title="任务进度、资料库与列表编排"
+              title={tr('任务进度、资料库与列表编排', 'Task Progress, Materials & List View')}
               onClick={() => {
                 setShowWorkspace((v) => {
                   const next = !v;
@@ -2719,11 +2793,13 @@ export const App: React.FC = () => {
         <div className="studio-feed">
           <div className="studio-feed-inner">
             {!isFreshRoom && (
-              <header className="jr-running-head" aria-label="当前会话">
+              <header className="jr-running-head" aria-label={tr('当前会话', 'Current Session')}>
                 <span className="jr-rh-brand">{BRAND.title}</span>
                 <span>{issueLabel(activeRun?.id)}</span>
-                <span className="jr-rh-title">{activeRun?.title}</span>
-                <span className="jr-rh-count">{realMessages.length} 条消息</span>
+                <span className="jr-rh-title">{tl(activeRun?.title)}</span>
+                <span className="jr-rh-count">
+                  {isEn ? `${realMessages.length} messages` : `${realMessages.length} 条消息`}
+                </span>
               </header>
             )}
             {isFreshRoom ? (
@@ -2731,11 +2807,11 @@ export const App: React.FC = () => {
                 showRinne={showRinne}
                 runs={runs}
                 issue={coverIssue}
-                workflowName={workflow?.name || '多模型协作工作流'}
+                workflowName={workflow?.name || tr('多模型协作工作流', 'Multi-Agent Workflow')}
                 steps={coverSteps}
                 onOpenSteps={openWorkflowCanvas}
                 quickActions={[
-                  { label: '邀请 Agent 接入', onPick: () => setShowInvite(true) },
+                  { label: tr('邀请 Agent 接入', 'Invite Agent'), onPick: () => setShowInvite(true) },
                   ...QUICK_PROMPTS.map((q) => ({ label: q.title, onPick: () => setInput(q.text) })),
                 ]}
               />
@@ -2813,7 +2889,7 @@ export const App: React.FC = () => {
                         />
                         <span className="studio-ai-name">{displaySenderName}</span>
                         {msg.stageTitle && (
-                          <span className="studio-ai-role">{msg.stageTitle}</span>
+                          <span className="studio-ai-role">{tl(msg.stageTitle)}</span>
                         )}
                         <span className="studio-ai-time">
                           {formatTime(msg.createdAt)}
@@ -2865,11 +2941,9 @@ export const App: React.FC = () => {
                             <summary>
                               <Terminal size={12} />
                               <span>
-                                执行过程（{msg.logs.length} 条日志
-                                {msg.durationMs
-                                  ? ` · ${(msg.durationMs / 1000).toFixed(1)}s`
-                                  : ''}
-                                ）
+                                {isEn
+                                  ? `Execution Log (${msg.logs.length} entries${msg.durationMs ? ` · ${(msg.durationMs / 1000).toFixed(1)}s` : ''})`
+                                  : `执行过程（${msg.logs.length} 条日志${msg.durationMs ? ` · ${(msg.durationMs / 1000).toFixed(1)}s` : ''}）`}
                               </span>
                             </summary>
                             <div className="studio-thought-body">
@@ -2890,7 +2964,7 @@ export const App: React.FC = () => {
                             <div className="error-diag-card">
                               <div className="error-diag-head">
                                 <Wrench size={12} />
-                                <strong>解决方法 · {diag.title}</strong>
+                                <strong>{tr('解决方法', 'Troubleshooting')} · {diag.title}</strong>
                               </div>
                               <div className="error-diag-reason">{diag.reason}</div>
                               <ul className="error-diag-steps">
@@ -2907,12 +2981,19 @@ export const App: React.FC = () => {
                                     onClick={async () => {
                                       await navigator.clipboard.writeText(buildStandbyPrompt(msg.senderId));
                                       setCopiedId(`err_standby_${msg.id}`);
-                                      flash(`已复制「${displaySenderName}」保活待命指令`);
+                                      flash(
+                                        tr(
+                                          `已复制「${displaySenderName}」保活待命指令`,
+                                          `Copied standby prompt for "${displaySenderName}"`,
+                                        ),
+                                      );
                                       setTimeout(() => setCopiedId(''), 1800);
                                     }}
                                   >
                                     <Copy size={11} />
-                                    {copiedId === `err_standby_${msg.id}` ? '已复制保活指令' : '复制保活待命指令'}
+                                    {copiedId === `err_standby_${msg.id}`
+                                      ? tr('已复制保活指令', 'Copied Standby')
+                                      : tr('复制保活待命指令', 'Copy Standby Prompt')}
                                   </button>
                                 )}
                                 {diag.suggestProviders && (
@@ -2923,7 +3004,7 @@ export const App: React.FC = () => {
                                     onClick={() => setShowProviders(true)}
                                   >
                                     <Settings2 size={11} />
-                                    检查模型池
+                                    {tr('检查模型池', 'Model Pool')}
                                   </button>
                                 )}
                                 <button
@@ -2933,7 +3014,7 @@ export const App: React.FC = () => {
                                   onClick={() => setShowTroubleshoot(true)}
                                 >
                                   <Wrench size={11} />
-                                  排障中心
+                                  {tr('排障中心', 'Diagnostics')}
                                 </button>
                               </div>
                             </div>
@@ -2947,16 +3028,19 @@ export const App: React.FC = () => {
                             onClick={() => void handleCopyMsg(msg)}
                           >
                             <Copy size={12} />
-                            {copiedId === msg.id ? '已复制' : '复制'}
+                            {copiedId === msg.id ? tr('已复制', 'Copied') : tr('复制', 'Copy')}
                           </button>
                           <button
                             type="button"
                             className="turn-action-btn"
-                            title="一键存入全局资料库，后续所有会话和模型都能自动参考"
+                            title={tr(
+                              '一键存入全局资料库，后续所有会话和模型都能自动参考',
+                              'Save to Global Knowledge Base for future sessions',
+                            )}
                             onClick={() => void handleArchiveMessageToKnowledge(msg)}
                           >
                             <BookOpen size={12} />
-                            存为资料
+                            {tr('存为资料', 'Save to KB')}
                           </button>
                           {msg.stageId && msg.stageId !== 'user_requirement' && (
                             <button
@@ -2965,7 +3049,7 @@ export const App: React.FC = () => {
                               onClick={() => void handleRerunFromNode(msg.stageId!)}
                             >
                               <RotateCcw size={12} />
-                              从此重跑
+                              {tr('从此重跑', 'Rerun Here')}
                             </button>
                           )}
                         </div>
@@ -2985,9 +3069,18 @@ export const App: React.FC = () => {
                       <div className="lpt-head">
                         <span className="lpt-head-left">
                           <span className="lpt-pulse" />
-                          <span>接单与处理中 · {pendingList.length} 位成员</span>
+                          <span>
+                            {isEn
+                              ? `In Progress · ${pendingList.length} ${pendingList.length === 1 ? 'member' : 'members'}`
+                              : `接单与处理中 · ${pendingList.length} 位成员`}
+                          </span>
                         </span>
-                        <span className="lpt-head-hint">完成后将按实际到达顺序进入上方正式对话</span>
+                        <span className="lpt-head-hint">
+                          {tr(
+                            '完成后将按实际到达顺序进入上方正式对话',
+                            'Replies move above in actual arrival order once finished',
+                          )}
+                        </span>
                       </div>
 
                       <div className="lpt-list">
@@ -3020,20 +3113,26 @@ export const App: React.FC = () => {
                           const wakeExpanded = Boolean(expandedWakeIds[msg.id]);
 
                           const statusText = isStalledWaiting
-                            ? '等待较久：可能成员端弹出了确认框，请切过去点允许，或点右侧跳过 / 手动粘贴回复'
+                            ? tr(
+                                '等待较久：可能成员端弹出了确认框，请切过去点允许，或点右侧跳过 / 手动粘贴回复',
+                                'Waiting long: check if the member popped a confirmation dialog, or skip / paste reply',
+                              )
                             : isNowListening
                               ? msg.logs.length > 0
                                 ? msg.logs[msg.logs.length - 1]
-                                : '已接单，正在生成回复…'
+                                : tr('已接单，正在生成回复…', 'Claimed — generating reply…')
                               : inReconnectGrace
-                                ? '正在接单处理中…'
+                                ? tr('正在接单处理中…', 'Claiming task…')
                                 : isBridgeAgent
-                                  ? '等待本轮回复（粘贴问题后 1 秒自动回执）'
+                                  ? tr(
+                                      '等待本轮回复（粘贴问题后 1 秒自动回执）',
+                                      'Waiting for bridge reply (auto-ingests in 1s)',
+                                    )
                                   : msg.wakePrompt
-                                    ? '任务已就绪，等待接单…'
+                                    ? tr('任务已就绪，等待接单…', 'Task ready — awaiting claim…')
                                     : msg.logs.length > 0
                                       ? msg.logs[msg.logs.length - 1]
-                                      : '正在思考与生成…';
+                                      : tr('正在思考与生成…', 'Thinking & generating…');
 
                           return (
                             <div
@@ -3070,19 +3169,29 @@ export const App: React.FC = () => {
                                       <button
                                         type="button"
                                         className="btn btn-ink btn-sm wake-mini-btn"
-                                        title="复制单轮直答指令（直接包含本轮问题与回执文件路径，不含轮询/待命字眼）"
+                                        title={tr(
+                                          '复制单轮直答指令（直接包含本轮问题与回执文件路径，不含轮询/待命字眼）',
+                                          'Copy one-shot reply prompt (includes this question and reply file path)',
+                                        )}
                                         onClick={async () => {
                                           await navigator.clipboard.writeText(
                                             msg.bridgeDirectPrompt ||
                                               buildFileBridgePrompt(msg.senderId, displaySenderName),
                                           );
                                           setCopiedId(`bridge_${msg.id}`);
-                                          flash(`已复制本轮直答指令，直接粘贴发给「${displaySenderName}」即可`);
+                                          flash(
+                                            tr(
+                                              `已复制本轮直答指令，直接粘贴发给「${displaySenderName}」即可`,
+                                              `Copied prompt — paste it to "${displaySenderName}"`,
+                                            ),
+                                          );
                                           setTimeout(() => setCopiedId(''), 2000);
                                         }}
                                       >
                                         <Copy size={11} />
-                                        {copiedId === `bridge_${msg.id}` ? '已复制' : '复制本轮问题'}
+                                        {copiedId === `bridge_${msg.id}`
+                                          ? tr('已复制', 'Copied')
+                                          : tr('复制本轮问题', 'Copy Prompt')}
                                       </button>
                                       <button
                                         type="button"
@@ -3096,7 +3205,9 @@ export const App: React.FC = () => {
                                           }
                                         }}
                                       >
-                                        {manualReplyMsgId === msg.id ? '收起' : '粘贴回复'}
+                                        {manualReplyMsgId === msg.id
+                                          ? tr('收起', 'Hide')
+                                          : tr('粘贴回复', 'Paste Reply')}
                                       </button>
                                     </>
                                   )}
@@ -3106,18 +3217,28 @@ export const App: React.FC = () => {
                                       <button
                                         type="button"
                                         className="btn btn-ink btn-sm wake-mini-btn"
-                                        title="复制零耗保活长连接待命指令发给该模型"
+                                        title={tr(
+                                          '复制零耗保活长连接待命指令发给该模型',
+                                          'Copy zero-token keepalive standby prompt for this agent',
+                                        )}
                                         onClick={async () => {
                                           await navigator.clipboard.writeText(
                                             buildStandbyPrompt(msg.senderId),
                                           );
                                           setCopiedId(`standby_${msg.id}`);
-                                          flash('已复制保活待命指令，发给对方即可恢复自动秒回');
+                                          flash(
+                                            tr(
+                                              '已复制保活待命指令，发给对方即可恢复自动秒回',
+                                              'Copied standby prompt — send to restore auto-reply',
+                                            ),
+                                          );
                                           setTimeout(() => setCopiedId(''), 1800);
                                         }}
                                       >
                                         <Terminal size={11} />
-                                        {copiedId === `standby_${msg.id}` ? '已复制' : '保活指令'}
+                                        {copiedId === `standby_${msg.id}`
+                                          ? tr('已复制', 'Copied')
+                                          : tr('保活指令', 'Standby')}
                                       </button>
                                       <button
                                         type="button"
@@ -3129,7 +3250,9 @@ export const App: React.FC = () => {
                                         }}
                                       >
                                         <Copy size={11} />
-                                        {copiedId === `wake_${msg.id}` ? '已复制' : '单次唤醒'}
+                                        {copiedId === `wake_${msg.id}`
+                                          ? tr('已复制', 'Copied')
+                                          : tr('单次唤醒', 'Wake Once')}
                                       </button>
                                     </>
                                   )}
@@ -3138,7 +3261,10 @@ export const App: React.FC = () => {
                                     <button
                                       type="button"
                                       className="btn btn-sm wake-mini-btn"
-                                      title="若成员端确认框阻断了自动回执，可直接把对方回复粘贴回填到群聊"
+                                      title={tr(
+                                        '若成员端确认框阻断了自动回执，可直接把对方回复粘贴回填到群聊',
+                                        'If an agent confirmation dialog blocked auto-reply, paste its reply directly here',
+                                      )}
                                       onClick={() => {
                                         if (manualReplyMsgId === msg.id) {
                                           setManualReplyMsgId(null);
@@ -3148,7 +3274,9 @@ export const App: React.FC = () => {
                                         }
                                       }}
                                     >
-                                      {manualReplyMsgId === msg.id ? '收起' : '粘贴回复'}
+                                      {manualReplyMsgId === msg.id
+                                        ? tr('收起', 'Hide')
+                                        : tr('粘贴回复', 'Paste Reply')}
                                     </button>
                                   )}
 
@@ -3156,7 +3284,10 @@ export const App: React.FC = () => {
                                     <button
                                       type="button"
                                       className="btn btn-sm wake-mini-btn"
-                                      title="仅跳过并取消这一条等待，立即释放该成员且不影响其他模型"
+                                      title={tr(
+                                        '仅跳过并取消这一条等待，立即释放该成员且不影响其他模型',
+                                        'Skip and cancel only this waiting turn without affecting other models',
+                                      )}
                                       onClick={async () => {
                                         try {
                                           const { run } = await api.cancelMessage(activeRun.id, msg.id);
@@ -3165,13 +3296,18 @@ export const App: React.FC = () => {
                                             setManualReplyMsgId(null);
                                             setManualReplyText('');
                                           }
-                                          flash(`已取消等待「${displaySenderName}」`);
+                                          flash(
+                                            tr(
+                                              `已取消等待「${displaySenderName}」`,
+                                              `Cancelled waiting for "${displaySenderName}"`,
+                                            ),
+                                          );
                                         } catch (err) {
-                                          flash(err instanceof Error ? err.message : '取消失败');
+                                          flash(err instanceof Error ? err.message : tr('取消失败', 'Cancel failed'));
                                         }
                                       }}
                                     >
-                                      取消
+                                      {tr('取消', 'Cancel')}
                                     </button>
                                   )}
 
@@ -3186,7 +3322,7 @@ export const App: React.FC = () => {
                                         }))
                                       }
                                     >
-                                      {wakeExpanded ? '收起 ▴' : '详情 ▾'}
+                                      {wakeExpanded ? tr('收起 ▴', 'Less ▴') : tr('详情 ▾', 'Details ▾')}
                                     </button>
                                   )}
                                 </div>
@@ -3197,7 +3333,10 @@ export const App: React.FC = () => {
                                   <textarea
                                     className="textarea"
                                     rows={3}
-                                    placeholder={`把「${displaySenderName}」的回复直接粘贴到这里，点右侧提交即可进入正式对话...`}
+                                    placeholder={tr(
+                                      `把「${displaySenderName}」的回复直接粘贴到这里，点右侧提交即可进入正式对话...`,
+                                      `Paste "${displaySenderName}"'s reply here and submit to post it into the chat...`,
+                                    )}
                                     value={manualReplyText}
                                     onChange={(e) => setManualReplyText(e.target.value)}
                                   />
@@ -3210,7 +3349,7 @@ export const App: React.FC = () => {
                                         setManualReplyText('');
                                       }}
                                     >
-                                      取消
+                                      {tr('取消', 'Cancel')}
                                     </button>
                                     <button
                                       type="button"
@@ -3226,15 +3365,26 @@ export const App: React.FC = () => {
                                           });
                                           setManualReplyMsgId(null);
                                           setManualReplyText('');
-                                          flash(`已提交「${displaySenderName}」的回复`);
+                                          flash(
+                                            tr(
+                                              `已提交「${displaySenderName}」的回复`,
+                                              `Submitted reply from "${displaySenderName}"`,
+                                            ),
+                                          );
                                         } catch (err) {
-                                          flash(err instanceof Error ? err.message : '提交回复失败');
+                                          flash(
+                                            err instanceof Error
+                                              ? err.message
+                                              : tr('提交回复失败', 'Failed to submit reply'),
+                                          );
                                         } finally {
                                           setSubmittingManualReply(false);
                                         }
                                       }}
                                     >
-                                      {submittingManualReply ? '提交中…' : '提交到正式对话'}
+                                      {submittingManualReply
+                                        ? tr('提交中…', 'Submitting…')
+                                        : tr('提交到正式对话', 'Post to Chat')}
                                     </button>
                                   </div>
                                 </div>
@@ -3246,11 +3396,27 @@ export const App: React.FC = () => {
                                     <div className="wake-detail-note">
                                       {isBridgeAgent ? (
                                         <span>
-                                          点「复制本轮问题」直接带上问题与回执路径（<code>chatroom-bridge\{msg.senderId}\replies\</code>），不要求后台轮询；对方写完文件 1 秒自动进入正式对话。
+                                          {isEn ? (
+                                            <>
+                                              Click "Copy Prompt" to include the question and reply path (<code>chatroom-bridge\{msg.senderId}\replies\</code>); once written, it enters the chat within 1s.
+                                            </>
+                                          ) : (
+                                            <>
+                                              点「复制本轮问题」直接带上问题与回执路径（<code>chatroom-bridge\{msg.senderId}\replies\</code>），不要求后台轮询；对方写完文件 1 秒自动进入正式对话。
+                                            </>
+                                          )}
                                         </span>
                                       ) : (
                                         <span>
-                                          {displaySenderName} 当前未挂起「⚡ 监听待命」。发送<strong>保活指令</strong>即可恢复 0 token 自动秒回。
+                                          {isEn ? (
+                                            <>
+                                              {displaySenderName} is not currently on live standby. Send the <strong>Standby</strong> prompt to restore 0-token auto-reply.
+                                            </>
+                                          ) : (
+                                            <>
+                                              {displaySenderName} 当前未挂起「⚡ 监听待命」。发送<strong>保活指令</strong>即可恢复 0 token 自动秒回。
+                                            </>
+                                          )}
                                         </span>
                                       )}
                                       <button
@@ -3258,7 +3424,7 @@ export const App: React.FC = () => {
                                         className="wake-diag-link"
                                         onClick={() => setShowTroubleshoot(true)}
                                       >
-                                        排障中心 →
+                                        {tr('排障中心 →', 'Troubleshoot →')}
                                       </button>
                                     </div>
                                   )}
@@ -3290,22 +3456,25 @@ export const App: React.FC = () => {
                 <div className="inline-approval-head">
                   <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
                     <Hand size={16} />
-                    <strong>等待人工拍板</strong>
-                    <span className="muted-sm">双方案对比已完成</span>
+                    <strong>{tr('等待人工拍板', 'Awaiting Approval')}</strong>
+                    <span className="muted-sm">{tr('双方案对比已完成', 'Proposals ready for review')}</span>
                   </div>
                   <button
                     type="button"
                     className="btn btn-sm"
                     onClick={() => setShowApproval(true)}
                   >
-                    三栏对比
+                    {tr('三栏对比', 'Compare')}
                   </button>
                 </div>
 
                 <input
                   className="input"
                   style={{ marginTop: 10 }}
-                  placeholder="可选补充指示；打回重议时请填写修改意见..."
+                  placeholder={tr(
+                    '可选补充指示；打回重议时请填写修改意见...',
+                    'Optional notes; add revision instructions if rejecting...',
+                  )}
                   value={inlineFeedback}
                   onChange={(e) => setInlineFeedback(e.target.value)}
                 />
@@ -3322,7 +3491,7 @@ export const App: React.FC = () => {
                     }
                   >
                     <RotateCcw size={12} />
-                    打回重议
+                    {tr('打回重议', 'Reject & Redo')}
                   </button>
                   <button
                     type="button"
@@ -3335,7 +3504,7 @@ export const App: React.FC = () => {
                     }
                   >
                     <CheckCircle2 size={13} />
-                    拍板通过
+                    {tr('拍板通过', 'Approve')}
                   </button>
                 </div>
               </div>
@@ -3375,8 +3544,8 @@ export const App: React.FC = () => {
                     >
                       <Paperclip size={14} />
                       <div className="attach-menu-text">
-                        <span>上传本地文件或图片</span>
-                        <small>支持多选、拖拽到窗口任意处或 Ctrl+V 粘贴截图</small>
+                        <span>{tr('上传本地文件或图片', 'Upload Local Files or Images')}</span>
+                        <small>{tr('支持多选、拖拽到窗口任意处或 Ctrl+V 粘贴截图', 'Multi-select, drag & drop anywhere, or Ctrl+V screenshots')}</small>
                       </div>
                     </button>
                     <button
@@ -3389,8 +3558,13 @@ export const App: React.FC = () => {
                     >
                       <FileCode2 size={14} />
                       <div className="attach-menu-text">
-                        <span>引用工作区文件</span>
-                        <small>从当前目录「{repoPath.split(/[/\\]/).filter(Boolean).pop() || repoPath}」快速选择</small>
+                        <span>{tr('引用工作区文件', 'Reference Workspace File')}</span>
+                        <small>
+                          {tr(
+                            `从当前目录「${repoPath.split(/[/\\]/).filter(Boolean).pop() || repoPath}」快速选择`,
+                            `Pick quickly from "${repoPath.split(/[/\\]/).filter(Boolean).pop() || repoPath}"`,
+                          )}
+                        </small>
                       </div>
                     </button>
                     <button
@@ -3400,8 +3574,8 @@ export const App: React.FC = () => {
                     >
                       <FileText size={14} />
                       <div className="attach-menu-text">
-                        <span>粘贴长文本 / 代码片段</span>
-                        <small>收起为独立文件卡片，保持输入框整洁</small>
+                        <span>{tr('粘贴长文本 / 代码片段', 'Paste Long Text / Code Snippet')}</span>
+                        <small>{tr('收起为独立文件卡片，保持输入框整洁', 'Collapse into a clean attachment card')}</small>
                       </div>
                     </button>
                   </div>
@@ -3414,11 +3588,11 @@ export const App: React.FC = () => {
                         type="button"
                         className="mini-icon-btn"
                         onClick={() => setAttachMenuMode('menu')}
-                        title="返回"
+                        title={tr('返回', 'Back')}
                       >
                         <ChevronLeft size={14} />
                       </button>
-                      <span>引用工作区文件</span>
+                      <span>{tr('引用工作区文件', 'Reference Workspace File')}</span>
                       <button
                         type="button"
                         className="mini-icon-btn"
@@ -3433,7 +3607,7 @@ export const App: React.FC = () => {
                       <input
                         className="attach-search-input"
                         autoFocus
-                        placeholder="搜索文件名或路径..."
+                        placeholder={tr('搜索文件名或路径...', 'Search file name or path...')}
                         value={wsFileQuery}
                         onChange={(e) => {
                           const v = e.target.value;
@@ -3445,10 +3619,10 @@ export const App: React.FC = () => {
                     <div className="attach-ws-list">
                       {loadingWsFiles ? (
                         <div className="attach-ws-empty">
-                          <Loader2 size={13} className="spin" /> 扫描工作区文件...
+                          <Loader2 size={13} className="spin" /> {tr('扫描工作区文件...', 'Scanning workspace...')}
                         </div>
                       ) : wsFiles.length === 0 ? (
-                        <div className="attach-ws-empty">未找到匹配文件</div>
+                        <div className="attach-ws-empty">{tr('未找到匹配文件', 'No matching files')}</div>
                       ) : (
                         wsFiles.map((f) => (
                           <button
@@ -3476,11 +3650,11 @@ export const App: React.FC = () => {
                         type="button"
                         className="mini-icon-btn"
                         onClick={() => setAttachMenuMode('menu')}
-                        title="返回"
+                        title={tr('返回', 'Back')}
                       >
                         <ChevronLeft size={14} />
                       </button>
-                      <span>粘贴长文本 / 代码片段</span>
+                      <span>{tr('粘贴长文本 / 代码片段', 'Paste Long Text / Code Snippet')}</span>
                       <button
                         type="button"
                         className="mini-icon-btn"
@@ -3493,7 +3667,7 @@ export const App: React.FC = () => {
                     <input
                       className="input"
                       style={{ marginBottom: 7 }}
-                      placeholder="片段名称（可选），如 error.log 或 spec.md"
+                      placeholder={tr('片段名称（可选），如 error.log 或 spec.md', 'Optional title, e.g. error.log or spec.md')}
                       value={snippetTitle}
                       onChange={(e) => setSnippetTitle(e.target.value)}
                     />
@@ -3501,7 +3675,7 @@ export const App: React.FC = () => {
                       className="textarea"
                       autoFocus
                       rows={5}
-                      placeholder="在此粘贴报错日志、代码或文档内容..."
+                      placeholder={tr('在此粘贴报错日志、代码或文档内容...', 'Paste error logs, code, or document text here...')}
                       value={snippetText}
                       onChange={(e) => setSnippetText(e.target.value)}
                     />
@@ -3511,7 +3685,7 @@ export const App: React.FC = () => {
                         className="btn btn-sm"
                         onClick={() => setAttachMenuMode('closed')}
                       >
-                        取消
+                        {tr('取消', 'Cancel')}
                       </button>
                       <button
                         type="button"
@@ -3519,7 +3693,7 @@ export const App: React.FC = () => {
                         disabled={!snippetText.trim() || uploadingFiles}
                         onClick={() => void handleAddSnippetAttachment()}
                       >
-                        添加为附件
+                        {tr('添加为附件', 'Attach')}
                       </button>
                     </div>
                   </div>
@@ -3592,7 +3766,7 @@ export const App: React.FC = () => {
             {showQuickExtMenu && (
               <div className="quick-ext-popover">
                 <div className="thinking-popover-head">
-                  <span>快捷扩展（随点随用 · 无需离开聊天）</span>
+                  <span>{tr('快捷扩展（随点随用 · 无需离开聊天）', 'Quick Extensions (instant use)')}</span>
                   <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
                     <button
                       type="button"
@@ -3602,7 +3776,7 @@ export const App: React.FC = () => {
                         setWorkbenchTab('skills');
                       }}
                     >
-                      全部管理 →
+                      {tr('全部管理 →', 'Manage All →')}
                     </button>
                     <button
                       type="button"
@@ -3616,7 +3790,7 @@ export const App: React.FC = () => {
 
                 {/* Quick Skills & Templates */}
                 <div className="qext-section">
-                  <div className="qext-label">一键填入技能 / 模板（也可直接打 / 唤起）</div>
+                  <div className="qext-label">{tr('一键填入技能 / 模板（也可直接打 / 唤起）', 'Insert Skill / Template (or type /)')}</div>
                   <div className="qext-chips">
                     {workbench.skills
                       .filter((s) => s.enabled && !s.autoInject)
@@ -3662,7 +3836,7 @@ export const App: React.FC = () => {
                 {/* Quick CLI Plugins */}
                 {workbench.plugins.some((p) => p.kind === 'cli_tool') && (
                   <div className="qext-section">
-                    <div className="qext-label">一键运行本地工具并将结果贴入输入框</div>
+                    <div className="qext-label">{tr('一键运行本地工具并将结果贴入输入框', 'Run local CLI tool and insert output')}</div>
                     <div className="qext-chips">
                       {workbench.plugins
                         .filter((p) => p.kind === 'cli_tool')
@@ -3688,7 +3862,7 @@ export const App: React.FC = () => {
 
                 {/* Quick Context Toggles */}
                 <div className="qext-section">
-                  <div className="qext-label">当前对话自动注入开关（点击切换）</div>
+                  <div className="qext-label">{tr('当前对话自动注入开关（点击切换）', 'Auto-inject context toggles')}</div>
                   <div className="qext-chips">
                     {workbench.skills
                       .filter((s) => s.autoInject)
@@ -3706,9 +3880,9 @@ export const App: React.FC = () => {
                         >
                           <span className={`presence-dot ${s.enabled ? 'idle' : 'offline'}`} />
                           <span>
-                            技能：{s.name}
+                            {tr('技能：', 'Skill: ')}{s.name}
                             {s.targetMemberIds && s.targetMemberIds.length > 0
-                              ? `（仅${s.targetMemberIds.length}人）`
+                              ? tr(`（仅${s.targetMemberIds.length}人）`, ` (${s.targetMemberIds.length} only)`)
                               : ''}
                           </span>
                         </button>
@@ -3726,7 +3900,7 @@ export const App: React.FC = () => {
                         }}
                       >
                         <span className={`presence-dot ${k.pinned ? 'idle' : 'offline'}`} />
-                        <span>资料：{k.title}</span>
+                        <span>{tr('资料：', 'Doc: ')}{k.title}</span>
                       </button>
                     ))}
                     {workbench.plugins
@@ -3757,12 +3931,12 @@ export const App: React.FC = () => {
                 key: 'all' | 'dev' | 'review' | 'brainstorm' | 'writing' | 'custom';
                 label: string;
               }> = [
-                { key: 'all', label: '全部' },
-                { key: 'review', label: '评审' },
-                { key: 'dev', label: '研发' },
-                { key: 'brainstorm', label: '脑暴' },
-                { key: 'writing', label: '写作' },
-                { key: 'custom', label: '自定义' },
+                { key: 'all', label: tr('全部', 'All') },
+                { key: 'review', label: tr('评审', 'Review') },
+                { key: 'dev', label: tr('研发', 'Dev') },
+                { key: 'brainstorm', label: tr('脑暴', 'Brainstorm') },
+                { key: 'writing', label: tr('写作', 'Writing') },
+                { key: 'custom', label: tr('自定义', 'Custom') },
               ];
               const filteredTemplates = workflowTemplates.filter((tpl) => {
                 if (wfCategoryFilter === 'all') return true;
@@ -3781,32 +3955,32 @@ export const App: React.FC = () => {
               return (
                 <div className="wf-picker-popover">
                   <div className="thinking-popover-head">
-                    <span>工作流模板与成员指派</span>
+                    <span>{tr('工作流模板与成员指派', 'Workflow Templates & Assignments')}</span>
                     <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
                       <button
                         type="button"
                         className={`quick-ext-manage-link ${showWfAiGen ? 'active' : ''}`}
                         onClick={() => setShowWfAiGen((v) => !v)}
-                        title="输入一句话让 AI 生成或修改当前工作流模板"
+                        title={tr('输入一句话让 AI 生成或修改当前工作流模板', 'Describe a workflow in one line to generate or edit it with AI')}
                       >
                         <Sparkles size={11} />
-                        <span>AI 生成</span>
+                        <span>{tr('AI 生成', 'AI Build')}</span>
                       </button>
                       <button
                         type="button"
                         className="quick-ext-manage-link"
                         onClick={() => void handleCreateBlankCanvas()}
-                        title="新建一个空白工作流画布从零编排"
+                        title={tr('新建一个空白工作流画布从零编排', 'Create a blank workflow canvas from scratch')}
                       >
                         <Plus size={11} />
-                        <span>新建画布</span>
+                        <span>{tr('新建画布', 'New Canvas')}</span>
                       </button>
                       <button
                         type="button"
                         className="quick-ext-manage-link"
                         onClick={openWorkflowCanvas}
                       >
-                        画布编排 →
+                        {tr('画布编排 →', 'Open Canvas →')}
                       </button>
                       <button
                         type="button"
@@ -3822,14 +3996,14 @@ export const App: React.FC = () => {
                     <div className="wf-ai-inline-bar">
                       <select
                         className="input wf-ai-gen-select"
-                        title="选择负责设计工作流的 AI 模型或成员"
+                        title={tr('选择负责设计工作流的 AI 模型或成员', 'Select which AI model or online member designs the workflow')}
                         value={wfAiGeneratorId}
                         disabled={wfAiBusy}
                         onChange={(e) => handleChangeWfAiGeneratorId(e.target.value)}
                       >
-                        <option value="auto">✨ 自动选择 AI</option>
+                        <option value="auto">{tr('✨ 自动选择 AI', '✨ Auto Select AI')}</option>
                         {wfAiGeneratorOptions.some((o) => o.group === 'agent') && (
-                          <optgroup label="在线成员（实时调用）">
+                          <optgroup label={tr('在线成员（实时调用）', 'Online Members (Live)')}>
                             {wfAiGeneratorOptions
                               .filter((o) => o.group === 'agent')
                               .map((o) => (
@@ -3840,7 +4014,7 @@ export const App: React.FC = () => {
                           </optgroup>
                         )}
                         {wfAiGeneratorOptions.some((o) => o.group === 'api') && (
-                          <optgroup label="模型池 API">
+                          <optgroup label={tr('模型池 API', 'Model Pool API')}>
                             {wfAiGeneratorOptions
                               .filter((o) => o.group === 'api')
                               .map((o) => (
@@ -3850,13 +4024,16 @@ export const App: React.FC = () => {
                               ))}
                           </optgroup>
                         )}
-                        <option value="local">⚡ 本地秒生（0 消耗）</option>
+                        <option value="local">{tr('⚡ 本地秒生（0 消耗）', '⚡ Local Instant (0 tokens)')}</option>
                       </select>
                       <input
                         className="input"
                         style={{ flex: 1, minWidth: 120, padding: '5px 8px', fontSize: 12 }}
                         autoFocus
-                        placeholder="一句话描述流程，如：3模型短视频脚本策划流，最后加人工拍板"
+                        placeholder={tr(
+                          '一句话描述流程，如：3模型短视频脚本策划流，最后加人工拍板',
+                          'Describe workflow, e.g. 3-model video script pipeline with human approval',
+                        )}
                         value={wfAiPrompt}
                         disabled={wfAiBusy}
                         onChange={(e) => setWfAiPrompt(e.target.value)}
@@ -3871,11 +4048,11 @@ export const App: React.FC = () => {
                           type="button"
                           className="btn btn-sm"
                           style={{ flexShrink: 0 }}
-                          title="若成员端弹出了确认框，可先切去点允许，或点此立即取消等待"
+                          title={tr('若成员端弹出了确认框，可先切去点允许，或点此立即取消等待', 'Approve the dialog in the agent window or cancel waiting')}
                           onClick={handleCancelWorkflowGenerate}
                         >
                           <Loader2 size={12} className="spin" />
-                          取消等待
+                          {tr('取消等待', 'Cancel')}
                         </button>
                       ) : (
                         <button
@@ -3886,7 +4063,7 @@ export const App: React.FC = () => {
                           onClick={() => void handleGenerateWorkflowFromPrompt(wfAiPrompt)}
                         >
                           <Sparkles size={12} />
-                          生成
+                          {tr('生成', 'Build')}
                         </button>
                       )}
                     </div>
@@ -3910,7 +4087,10 @@ export const App: React.FC = () => {
                   <div className="wf-tpl-card-grid">
                     {filteredTemplates.length === 0 ? (
                       <div className="wf-tpl-empty">
-                        当前分类暂无模板，可点右上角「AI 生成」或去画布另存自定义模板。
+                        {tr(
+                          '当前分类暂无模板，可点右上角「AI 生成」或去画布另存自定义模板。',
+                          'No templates in this category yet. Click "AI Build" or save a custom template from Canvas.',
+                        )}
                       </div>
                     ) : (
                       filteredTemplates.map((tpl) => {
@@ -3925,7 +4105,9 @@ export const App: React.FC = () => {
                           >
                             <div className="wf-tpl-card-head">
                               <span className="wf-tpl-card-name">{tpl.name}</span>
-                              <span className="wf-picker-steps">{tpl.workflow.nodes.length}步</span>
+                              <span className="wf-picker-steps">
+                                {tr(`${tpl.workflow.nodes.length}步`, `${tpl.workflow.nodes.length} steps`)}
+                              </span>
                             </div>
                             <div className="wf-tpl-card-desc">{tpl.description}</div>
                           </button>
@@ -3937,17 +4119,20 @@ export const App: React.FC = () => {
                   {/* Per-Node Model Assignment & Skip Toggle */}
                   <div className="wf-nodes-toolbar">
                     <span className="wf-nodes-toolbar-title">
-                      {workflow.name} · 勾选启停或指派模型
+                      {workflow.name} · {tr('勾选启停或指派模型', 'Toggle steps or assign models')}
                     </span>
                     <button
                       type="button"
                       className="btn btn-sm"
                       style={{ height: 24, fontSize: 11, padding: '0 8px' }}
-                      title="自动把当前在线成员轮换分配到各步骤（并行分支自动错开不同模型）"
+                      title={tr(
+                        '自动把当前在线成员轮换分配到各步骤（并行分支自动错开不同模型）',
+                        'Auto-assign online members across steps (parallel branches get distinct models)',
+                      )}
                       onClick={() => void handleAutoAssignWorkflowModels()}
                     >
                       <Sparkles size={11} />
-                      一键分配在线模型
+                      {tr('一键分配在线模型', 'Auto-Assign Online')}
                     </button>
                   </div>
 
@@ -3976,7 +4161,7 @@ export const App: React.FC = () => {
                             <input
                               type="checkbox"
                               checked={isEnabled}
-                              title={isEnabled ? '取消勾选跳过此步骤' : '勾选启用此步骤'}
+                              title={isEnabled ? tr('取消勾选跳过此步骤', 'Uncheck to skip step') : tr('勾选启用此步骤', 'Check to enable step')}
                               onChange={(e) =>
                                 void handleSaveNode({ ...node, enabled: e.target.checked })
                               }
@@ -3985,11 +4170,11 @@ export const App: React.FC = () => {
                             <span className="wf-picker-node-title" title={node.subtitle}>
                               {node.title}
                             </span>
-                            {isParallel && <span className="wf-parallel-tag">并行</span>}
+                            {isParallel && <span className="wf-parallel-tag">{tr('并行', 'Parallel')}</span>}
                             {isGate ? (
-                              <span className="sf-human-tag">人工拍板</span>
+                              <span className="sf-human-tag">{tr('人工拍板', 'Approval')}</span>
                             ) : isShell ? (
-                              <span className="sf-human-tag">命令自检</span>
+                              <span className="sf-human-tag">{tr('命令自检', 'Shell')}</span>
                             ) : isNonModel ? (
                               <span className="sf-human-tag">{node.kind}</span>
                             ) : (
@@ -4002,9 +4187,9 @@ export const App: React.FC = () => {
                                   void handleSaveNode({ ...node, providerId: e.target.value })
                                 }
                               >
-                                <option value="">选择模型（自动）</option>
+                                <option value="">{tr('选择模型（自动）', 'Auto Model')}</option>
                                 {activeMembers.length > 0 && (
-                                  <optgroup label="当前在线成员">
+                                  <optgroup label={tr('当前在线成员', 'Online Members')}>
                                     {activeMembers.map((m) => (
                                       <option key={m.id} value={m.id}>
                                         {m.name}
@@ -4013,7 +4198,7 @@ export const App: React.FC = () => {
                                   </optgroup>
                                 )}
                                 {fallbackProviders.length > 0 && (
-                                  <optgroup label="其他模型池">
+                                  <optgroup label={tr('其他模型池', 'Other Pool Models')}>
                                     {fallbackProviders.map((p) => (
                                       <option key={p.id} value={p.id}>
                                         {p.shortName}
@@ -4031,8 +4216,8 @@ export const App: React.FC = () => {
                   <div className="wf-picker-foot">
                     <span className="wf-picker-hint">
                       {input.trim() || pendingAttachments.length > 0
-                        ? '就绪：点击右侧按钮立刻按此模板执行'
-                        : '请先在下方聊天框输入任务需求'}
+                        ? tr('就绪：点击右侧按钮立刻按此模板执行', 'Ready: click the button to launch this workflow')
+                        : tr('请先在下方聊天框输入任务需求', 'Enter your task in the composer below first')}
                     </span>
                     <button
                       type="button"
@@ -4044,7 +4229,7 @@ export const App: React.FC = () => {
                       }}
                     >
                       <Play size={11} />
-                      按此模板启动
+                      {tr('按此模板启动', 'Run Template')}
                     </button>
                   </div>
                 </div>
@@ -4054,7 +4239,7 @@ export const App: React.FC = () => {
             {showThinkingMenu && activeMembers.length > 0 && (
               <div className="thinking-popover">
                 <div className="thinking-popover-head">
-                  <span>各模型思考程度（即时生效）</span>
+                  <span>{tr('各模型思考程度（即时生效）', 'Reasoning Effort (Immediate)')}</span>
                   <button
                     type="button"
                     className="mini-icon-btn"
@@ -4096,7 +4281,7 @@ export const App: React.FC = () => {
             {showRelayMenu && (
               <div className="relay-popover">
                 <div className="thinking-popover-head">
-                  <span>AI 互聊自动接力轮数</span>
+                  <span>{tr('AI 互聊自动接力轮数', 'AI Auto-Relay Rounds')}</span>
                   <button
                     type="button"
                     className="mini-icon-btn"
@@ -4107,12 +4292,12 @@ export const App: React.FC = () => {
                 </div>
                 <div className="relay-presets">
                   {[
-                    { value: 0, label: '关闭 (单轮)' },
-                    { value: 2, label: '2 轮' },
-                    { value: 4, label: '4 轮' },
-                    { value: 6, label: '6 轮' },
-                    { value: 10, label: '10 轮' },
-                    { value: -1, label: '∞ 无限' },
+                    { value: 0, label: tr('关闭 (单轮)', 'Off (1-turn)') },
+                    { value: 2, label: tr('2 轮', '2 rounds') },
+                    { value: 4, label: tr('4 轮', '4 rounds') },
+                    { value: 6, label: tr('6 轮', '6 rounds') },
+                    { value: 10, label: tr('10 轮', '10 rounds') },
+                    { value: -1, label: tr('∞ 无限', '∞ Unlimited') },
                   ].map((opt) => (
                     <button
                       key={opt.value}
@@ -4122,10 +4307,10 @@ export const App: React.FC = () => {
                         setAutoRelayRounds(opt.value);
                         flash(
                           opt.value === -1
-                            ? '已开启 ∞ 无限互聊接力（可随时点红色停止按钮叫停）'
+                            ? tr('已开启 ∞ 无限互聊接力（可随时点红色停止按钮叫停）', 'Unlimited auto-relay enabled (click red Stop anytime)')
                             : opt.value === 0
-                              ? '已关闭 AI 自动互聊接力（单轮模式）'
-                              : `已设置 AI 自动互聊上限：${opt.value} 轮`,
+                              ? tr('已关闭 AI 自动互聊接力（单轮模式）', 'Auto-relay off (single-turn mode)')
+                              : tr(`已设置 AI 自动互聊上限：${opt.value} 轮`, `Auto-relay limit set to ${opt.value} rounds`),
                         );
                       }}
                     >
@@ -4134,7 +4319,7 @@ export const App: React.FC = () => {
                   ))}
                 </div>
                 <div className="relay-custom-row">
-                  <span className="relay-custom-label">自定义轮数</span>
+                  <span className="relay-custom-label">{tr('自定义轮数', 'Custom')}</span>
                   <input
                     type="number"
                     min={1}
@@ -4148,7 +4333,7 @@ export const App: React.FC = () => {
                         const n = Math.floor(Number(customRelayInput));
                         if (Number.isFinite(n) && n >= 1 && n <= 999) {
                           setAutoRelayRounds(n);
-                          flash(`已设置 AI 自动互聊上限：${n} 轮`);
+                          flash(tr(`已设置 AI 自动互聊上限：${n} 轮`, `Auto-relay limit set to ${n} rounds`));
                         }
                       }
                     }}
@@ -4161,21 +4346,30 @@ export const App: React.FC = () => {
                       const n = Math.floor(Number(customRelayInput));
                       if (Number.isFinite(n) && n >= 1 && n <= 999) {
                         setAutoRelayRounds(n);
-                        flash(`已设置 AI 自动互聊上限：${n} 轮`);
+                        flash(tr(`已设置 AI 自动互聊上限：${n} 轮`, `Auto-relay limit set to ${n} rounds`));
                       } else {
-                        flash('请输入 1 到 999 之间的整数');
+                        flash(tr('请输入 1 到 999 之间的整数', 'Enter an integer between 1 and 999'));
                       }
                     }}
                   >
-                    应用
+                    {tr('应用', 'Apply')}
                   </button>
                 </div>
                 <div className="relay-hint-note">
                   {autoRelayRounds === -1
-                    ? '⚡ 无限模式：模型只要在回复中互相 @对方就会持续接力，直到不再 @任何人，或随时点击右下角红色「停止」按钮立刻叫停。'
+                    ? tr(
+                        '⚡ 无限模式：模型只要在回复中互相 @对方就会持续接力，直到不再 @任何人，或随时点击右下角红色「停止」按钮立刻叫停。',
+                        '⚡ Unlimited: models keep relaying whenever they @mention another online member until they stop or you click Stop.',
+                      )
                     : autoRelayRounds > 0
-                      ? `模型回复正文里 @其他在线成员 时自动接力下一轮（最多 ${autoRelayRounds} 轮），对话期间可随时点停止中断。`
-                      : '当前为单轮模式：仅响应你发送的消息，AI 之间不会自动接力。'}
+                      ? tr(
+                          `模型回复正文里 @其他在线成员 时自动接力下一轮（最多 ${autoRelayRounds} 轮），对话期间可随时点停止中断。`,
+                          `Models auto-relay when they @mention other online members (up to ${autoRelayRounds} rounds). Click Stop anytime.`,
+                        )
+                      : tr(
+                          '当前为单轮模式：仅响应你发送的消息，AI 之间不会自动接力。',
+                          'Single-turn mode: models reply to your message without auto-relaying to each other.',
+                        )}
                 </div>
               </div>
             )}
@@ -4223,7 +4417,10 @@ export const App: React.FC = () => {
               ref={textareaRef}
               className="studio-textarea"
               rows={2}
-              placeholder="输入 @ 点名模型，输入 / 唤起技能，点击左下角 + 或拖拽上传附件"
+              placeholder={tr(
+                '输入 @ 点名模型，输入 / 唤起技能，点击左下角 + 或拖拽上传附件',
+                'Type @ to mention models, / for skills, click + or drop files to attach',
+              )}
               value={input}
               onPaste={(e) => {
                 const files = e.clipboardData?.files;
@@ -4316,7 +4513,7 @@ export const App: React.FC = () => {
                     onClick={() => setShowInvite(true)}
                   >
                     <UserPlus size={11} />
-                    先邀请模型入群或配置 API
+                    {tr('先邀请模型入群或配置 API', 'Invite an Agent or configure API')}
                   </button>
                 ) : (
                   <>
@@ -4325,9 +4522,13 @@ export const App: React.FC = () => {
                         type="button"
                         className={`at-pill ${allTargetsSelected ? 'active' : ''}`}
                         onClick={toggleAllTargets}
-                        title={allTargetsSelected ? '再次点击取消全选' : '选中全部在线模型'}
+                        title={
+                          allTargetsSelected
+                            ? tr('再次点击取消全选', 'Click again to deselect all')
+                            : tr('选中全部在线模型', 'Mention all online models')
+                        }
                       >
-                        @全员
+                        {tr('@全员', '@All')}
                       </button>
                     )}
                     {activeMembers.map((m) => {
@@ -4341,8 +4542,11 @@ export const App: React.FC = () => {
                           onClick={() => handlePillClick(m.id, m.name)}
                           title={
                             active
-                              ? `${m.name}（已点名 · 再点一次取消 @${m.name}）`
-                              : `${m.name}（${isWorking ? '工作中' : '在线 · 空闲'} · 点击在聊天框插入 @${m.name}）`
+                              ? tr(`${m.name}（已点名 · 再点一次取消 @${m.name}）`, `${m.name} (mentioned — click to remove)`)
+                              : tr(
+                                  `${m.name}（${isWorking ? '工作中' : '在线 · 空闲'} · 点击在聊天框插入 @${m.name}）`,
+                                  `${m.name} (${isWorking ? 'Working' : 'Idle'} — click to insert @${m.name})`,
+                                )
                           }
                         >
                           <MemberAvatar
@@ -4356,10 +4560,10 @@ export const App: React.FC = () => {
                           {isWorking ? (
                             <span className="pill-working-badge">
                               <span className="presence-dot working" />
-                              工作中
+                              {tr('工作中', 'Working')}
                             </span>
                           ) : (
-                            <span className="presence-dot idle" title="在线 · 空闲" />
+                            <span className="presence-dot idle" title={tr('在线 · 空闲', 'Online · Idle')} />
                           )}
                         </button>
                       );
@@ -4379,10 +4583,13 @@ export const App: React.FC = () => {
                     setShowWorkflowPicker(false);
                     setAttachMenuMode('closed');
                   }}
-                  title="随手调用技能、运行插件或开关全局资料注入（也可在输入框打 / 唤起）"
+                  title={tr(
+                    '随手调用技能、运行插件或开关全局资料注入（也可在输入框打 / 唤起）',
+                    'Run skills, plugins, or toggle global context (or type /)',
+                  )}
                 >
                   <Blocks size={13} />
-                  <span>扩展</span>
+                  <span>{tr('扩展', 'Tools')}</span>
                 </button>
                 {activeMembers.length > 0 && (
                   <button
@@ -4395,10 +4602,10 @@ export const App: React.FC = () => {
                       setShowWorkflowPicker(false);
                       setAttachMenuMode('closed');
                     }}
-                    title="快捷调节各个模型的思考深度"
+                    title={tr('快捷调节各个模型的思考深度', 'Adjust reasoning effort per model')}
                   >
                     <Brain size={13} />
-                    <span>思考</span>
+                    <span>{tr('思考', 'Think')}</span>
                   </button>
                 )}
                 <button
@@ -4411,22 +4618,27 @@ export const App: React.FC = () => {
                     setShowWorkflowPicker(false);
                     setAttachMenuMode('closed');
                   }}
-                  title="设置 AI 之间 @点名 自动互聊接力轮数（支持关闭 / 自定义 / ∞ 无限）"
+                  title={tr(
+                    '设置 AI 之间 @点名 自动互聊接力轮数（支持关闭 / 自定义 / ∞ 无限）',
+                    'Configure AI-to-AI @mention auto-relay rounds (Off / Custom / ∞)',
+                  )}
                 >
                   <Repeat size={13} />
                   <span>
                     {autoRelayRounds === -1
-                      ? '互聊 ∞'
+                      ? tr('互聊 ∞', 'Relay ∞')
                       : autoRelayRounds > 0
-                        ? `互聊 ${autoRelayRounds}轮`
-                        : '互聊 关'}
+                        ? isEn
+                          ? `Relay ${autoRelayRounds}`
+                          : `互聊 ${autoRelayRounds}轮`
+                        : tr('互聊 关', 'Relay Off')}
                   </span>
                 </button>
                 {isRunning ? (
                   <button
                     type="button"
                     className="send-circle stop"
-                    title="停止所有进行中的回复 / 立刻中断互聊接力"
+                    title={tr('停止所有进行中的回复 / 立刻中断互聊接力', 'Stop all active replies / abort relay')}
                     onClick={handleAbort}
                   >
                     <Square size={12} fill="currentColor" />
@@ -4442,10 +4654,13 @@ export const App: React.FC = () => {
                       setShowRelayMenu(false);
                       setAttachMenuMode('closed');
                     }}
-                    title="选择工作流模板、指定各节点模型并启动板块流程"
+                    title={tr(
+                      '选择工作流模板、指定各节点模型并启动板块流程',
+                      'Pick a workflow template, assign models & run stages',
+                    )}
                   >
                     <GitBranch size={13} />
-                    <span>按板块跑</span>
+                    <span>{tr('按板块跑', 'Workflow')}</span>
                   </button>
                 )}
                 <button
@@ -4747,7 +4962,7 @@ export const App: React.FC = () => {
             }}
           >
             <AtSign size={13} />
-            <span>@ 点名发言</span>
+            <span>{tr('@ 点名发言', '@ Mention in Chat')}</span>
           </button>
 
           <button
@@ -4769,7 +4984,7 @@ export const App: React.FC = () => {
             }}
           >
             <Pencil size={13} />
-            <span>编辑详情 / 改名 / 配额</span>
+            <span>{tr('编辑详情 / 改名 / 配额', 'Edit Profile / Rename / Quota')}</span>
           </button>
 
           <button
@@ -4791,7 +5006,11 @@ export const App: React.FC = () => {
             }}
           >
             <Power size={13} />
-            <span>{memberContextMenu.member.presence === 'offline' ? '恢复在线' : '设为离线'}</span>
+            <span>
+              {memberContextMenu.member.presence === 'offline'
+                ? tr('恢复在线', 'Set Online')
+                : tr('设为离线', 'Set Offline')}
+            </span>
           </button>
 
           {memberContextMenu.member.listening && (
@@ -4803,12 +5022,16 @@ export const App: React.FC = () => {
                 const target = memberContextMenu.member;
                 setMemberContextMenu(null);
                 void api.stopAgentStandby(target.id).then(() => {
-                  flash(`已通知「${target.name}」退出待命监听`);
+                  flash(
+                    isEn
+                      ? `Notified "${target.name}" to exit standby`
+                      : `已通知「${target.name}」退出待命监听`,
+                  );
                 });
               }}
             >
               <Square size={12} />
-              <span>停止待命监听</span>
+              <span>{tr('停止待命监听', 'Stop Standby Listener')}</span>
             </button>
           )}
 
@@ -4830,12 +5053,16 @@ export const App: React.FC = () => {
               try {
                 await handleRemoveMember(target);
               } catch (err) {
-                flash(err instanceof Error ? err.message : '移除成员失败');
+                flash(err instanceof Error ? err.message : tr('移除成员失败', 'Failed to remove member'));
               }
             }}
           >
             <Trash2 size={13} />
-            <span>{memberContextMenu.confirmDelete ? '再点一次确认移除' : '移除成员'}</span>
+            <span>
+              {memberContextMenu.confirmDelete
+                ? tr('再点一次确认移除', 'Click again to confirm')
+                : tr('移除成员', 'Remove Member')}
+            </span>
           </button>
         </div>
       )}

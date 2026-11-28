@@ -23,6 +23,7 @@ import type {
   ProviderHealth,
 } from '../../shared/types';
 import { api } from '../api';
+import { useI18n } from '../i18n';
 
 interface ProvidersModalProps {
   providers: ProviderConfig[];
@@ -262,10 +263,12 @@ const CONNECTION_LABELS: Record<ProviderConnectionType, string> = {
 
 const API_PRESETS: Array<{
   label: string;
+  labelEn: string;
   create: () => ProviderConfig;
 }> = [
   {
     label: '+ DeepSeek API',
+    labelEn: '+ DeepSeek API',
     create: () => ({
       id: `deepseek_${Date.now().toString(36).slice(-4)}`,
       name: 'DeepSeek',
@@ -288,6 +291,7 @@ const API_PRESETS: Array<{
   },
   {
     label: '+ OpenAI 兼容 API',
+    labelEn: '+ OpenAI-Compat API',
     create: () => ({
       id: `openai_${Date.now().toString(36).slice(-4)}`,
       name: 'OpenAI 兼容模型',
@@ -310,6 +314,7 @@ const API_PRESETS: Array<{
   },
   {
     label: '+ Azure OpenAI',
+    labelEn: '+ Azure OpenAI',
     create: () => ({
       id: `azure_${Date.now().toString(36).slice(-4)}`,
       name: 'Azure OpenAI',
@@ -332,6 +337,7 @@ const API_PRESETS: Array<{
   },
   {
     label: '+ Claude API',
+    labelEn: '+ Claude API',
     create: () => ({
       id: `claude_api_${Date.now().toString(36).slice(-4)}`,
       name: 'Claude API',
@@ -354,6 +360,7 @@ const API_PRESETS: Array<{
   },
   {
     label: '+ Gemini API',
+    labelEn: '+ Gemini API',
     create: () => ({
       id: `gemini_api_${Date.now().toString(36).slice(-4)}`,
       name: 'Gemini API',
@@ -376,6 +383,7 @@ const API_PRESETS: Array<{
   },
   {
     label: '+ Antigravity CLI (agy)',
+    labelEn: '+ Antigravity CLI (agy)',
     create: () => ({
       id: `agy_${Date.now().toString(36).slice(-4)}`,
       name: 'Antigravity CLI (Gemini)',
@@ -397,6 +405,7 @@ const API_PRESETS: Array<{
   },
   {
     label: '+ 订阅制 CLI',
+    labelEn: '+ Local CLI',
     create: () => ({
       id: `cli_${Date.now().toString(36).slice(-4)}`,
       name: '自定义订阅 CLI',
@@ -424,6 +433,7 @@ export const ProvidersModal: React.FC<ProvidersModalProps> = ({
   onOpenInvite,
   onSaved,
 }) => {
+  const { isEn, tr } = useI18n();
   const [draft, setDraft] = useState<ProviderConfig[]>(() =>
     structuredClone(providers).map((p) => ({
       ...p,
@@ -639,15 +649,18 @@ export const ProvidersModal: React.FC<ProvidersModalProps> = ({
       <div className="modal modal-xl" onClick={(e) => e.stopPropagation()}>
         <div className="modal-header">
           <div>
-            <h2>模型池配置（支持订阅制 CLI / API 直连）</h2>
+            <h2>{tr('模型池配置（支持订阅制 CLI / API 直连）', 'Model Pool (Subscription CLI / Direct API)')}</h2>
             <div style={{ fontSize: 12, color: '#64748b', marginTop: 3 }}>
-              每个模型可自由切换「订阅制本地 CLI」或「API 直连（OpenAI 兼容 / Anthropic / Gemini）」，所有密钥仅保存在本机。
+              {tr(
+                '每个模型可自由切换「订阅制本地 CLI」或「API 直连（OpenAI 兼容 / Anthropic / Gemini）」，所有密钥仅保存在本机。',
+                'Switch any model between Local Subscription CLI and Direct API (OpenAI-compat / Anthropic / Gemini). Keys stay local.',
+              )}
             </div>
           </div>
           <div style={{ display: 'flex', gap: 8 }}>
             <button className="btn btn-sm" onClick={runHealthCheck} disabled={checking}>
               <RefreshCw size={13} className={checking ? 'spin' : ''} />
-              {checking ? '检测中...' : '检测环境'}
+              {checking ? tr('检测中...', 'Checking...') : tr('检测环境', 'Check Env')}
             </button>
             <button className="btn btn-sm" onClick={onClose}>
               <X size={15} />
@@ -659,11 +672,12 @@ export const ProvidersModal: React.FC<ProvidersModalProps> = ({
           {/* 3-Way Onboarding & Shortcut Banner */}
           <div className="providers-onboarding-strip">
             <div className="providers-onboarding-copy">
-              <strong>不知道选哪种？3 秒选对接入方式：</strong>
+              <strong>{tr('不知道选哪种？3 秒选对接入方式：', 'Not sure which to pick? 3-second guide:')}</strong>
               <span>
-                ① 已有豆包 / DeepSeek / Cursor / Antigravity 等现成 AI 窗口 → 直接「邀请入群」免配 Key；
-                ② 有官方订阅 → 下面 CLI 点「终端运行」两步装好登录；
-                ③ 有 API Key → 点下方快捷模板，点「去获取 Key」粘贴测通即可。
+                {tr(
+                  '① 已有豆包 / DeepSeek / Cursor / Antigravity 等现成 AI 窗口 → 直接「邀请入群」免配 Key；② 有官方订阅 → 下面 CLI 点「终端运行」两步装好登录；③ 有 API Key → 点下方快捷模板，点「去获取 Key」粘贴测通即可。',
+                  '① Existing AI window (Cursor / Antigravity / WorkBuddy / Doubao) → use "Invite Agent" (no key needed); ② Subscription CLI → click "Run in Terminal" below to install & sign in; ③ API Key → pick a preset below, paste your key, and test.',
+                )}
               </span>
             </div>
             {onOpenInvite && (
@@ -674,7 +688,7 @@ export const ProvidersModal: React.FC<ProvidersModalProps> = ({
                 onClick={onOpenInvite}
               >
                 <UserPlus size={12} />
-                <span>去「邀请模型入群」</span>
+                <span>{tr('去「邀请模型入群」', 'Invite Agent')}</span>
                 <ArrowRight size={12} />
               </button>
             )}
@@ -684,7 +698,7 @@ export const ProvidersModal: React.FC<ProvidersModalProps> = ({
           <div className="quick-add-bar">
             <span style={{ fontSize: 12, fontWeight: 700, color: '#374151', display: 'inline-flex', alignItems: 'center', gap: 4 }}>
               <Plus size={13} />
-              快速接入其他模型：
+              {tr('快速接入其他模型：', 'Quick Add Model:')}
             </span>
             {API_PRESETS.map((preset) => (
               <button
@@ -693,7 +707,7 @@ export const ProvidersModal: React.FC<ProvidersModalProps> = ({
                 className="preset-chip active-chip"
                 onClick={() => addPreset(preset.create)}
               >
-                {preset.label}
+                {isEn ? preset.labelEn : preset.label}
               </button>
             ))}
           </div>
@@ -714,21 +728,24 @@ export const ProvidersModal: React.FC<ProvidersModalProps> = ({
             }}
           >
             <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap', alignItems: 'center' }}>
-              <strong>本机工具：</strong>
+              <strong>{tr('本机工具：', 'Local Tools:')}</strong>
               <span className={`health-pill ${gitHealth?.installed ? 'ok' : 'miss'}`}>
                 {gitHealth?.installed ? <CheckCircle2 size={12} /> : <XCircle size={12} />}
-                git {gitHealth?.installed ? '已安装' : '未安装'}
+                git {gitHealth?.installed ? tr('已安装', 'Ready') : tr('未安装', 'Missing')}
               </span>
               <span className={`health-pill ${ghHealth?.installed ? 'ok' : 'miss'}`}>
                 {ghHealth?.installed ? <CheckCircle2 size={12} /> : <XCircle size={12} />}
-                gh（可选）{ghHealth?.installed ? '已安装' : '未安装'}
+                gh{tr('（可选）', ' (opt)')} {ghHealth?.installed ? tr('已安装', 'Ready') : tr('未安装', 'Missing')}
               </span>
             </div>
 
             <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
               <label
                 className="copy-terminal-toggle"
-                title="开启后，点任意命令的「复制」按钮都会顺便弹出一个本机终端窗口，直接 Ctrl+V 就能粘贴执行"
+                title={tr(
+                  '开启后，点任意命令的「复制」按钮都会顺便弹出一个本机终端窗口，直接 Ctrl+V 就能粘贴执行',
+                  'When enabled, clicking Copy also opens a local PowerShell terminal ready for Ctrl+V',
+                )}
               >
                 <input
                   type="checkbox"
@@ -736,16 +753,16 @@ export const ProvidersModal: React.FC<ProvidersModalProps> = ({
                   onChange={(e) => toggleCopyOpenTerminal(e.target.checked)}
                 />
                 <Terminal size={12} />
-                <span>复制命令后自动打开终端</span>
+                <span>{tr('复制命令后自动打开终端', 'Auto-open terminal on copy')}</span>
               </label>
               <button
                 type="button"
                 className="btn btn-sm"
-                title="直接打开一个空白本机 PowerShell 终端"
-                onClick={() => void api.launchProviderTerminal('', '本机终端', false)}
+                title={tr('直接打开一个空白本机 PowerShell 终端', 'Open a blank local PowerShell window')}
+                onClick={() => void api.launchProviderTerminal('', 'Local Terminal', false)}
               >
                 <Terminal size={12} />
-                <span>打开终端</span>
+                <span>{tr('打开终端', 'Open Terminal')}</span>
               </button>
             </div>
           </div>
@@ -758,6 +775,15 @@ export const ProvidersModal: React.FC<ProvidersModalProps> = ({
             const isLocalApi = isApi && /127\.0\.0\.1|localhost/i.test(p.apiBaseUrl || '');
             const apiReady = isApi && Boolean((p.apiKey?.trim() || isLocalApi) && p.model?.trim());
             const guide = getProviderGuide(p);
+            const connLabelMap: Record<ProviderConnectionType, string> = isEn
+              ? {
+                  cli: 'Subscription (Local CLI)',
+                  openai_api: 'OpenAI-Compatible API',
+                  azure_openai: 'Azure OpenAI API',
+                  anthropic_api: 'Anthropic API',
+                  gemini_api: 'Gemini API',
+                }
+              : CONNECTION_LABELS;
 
             return (
               <div key={p.id} className="provider-card">
@@ -775,7 +801,7 @@ export const ProvidersModal: React.FC<ProvidersModalProps> = ({
                       <div style={{ fontWeight: 700, fontSize: 14 }}>
                         {p.shortName}
                         <span className="conn-type-badge">
-                          {CONNECTION_LABELS[connType]}
+                          {connLabelMap[connType]}
                         </span>
                       </div>
                       <div style={{ fontSize: 12, color: '#64748b' }}>
@@ -788,12 +814,16 @@ export const ProvidersModal: React.FC<ProvidersModalProps> = ({
                     {isApi ? (
                       <span className={`health-pill ${apiReady ? 'ok' : 'miss'}`}>
                         {apiReady ? <CheckCircle2 size={12} /> : <XCircle size={12} />}
-                        {apiReady ? `API 已填 (${p.model})` : '待填 API Key / 模型名'}
+                        {apiReady
+                          ? tr(`API 已填 (${p.model})`, `API Ready (${p.model})`)
+                          : tr('待填 API Key / 模型名', 'API Key / Model Needed')}
                       </span>
                     ) : (
                       <span className={`health-pill ${h?.installed ? 'ok' : 'miss'}`}>
                         {h?.installed ? <CheckCircle2 size={12} /> : <XCircle size={12} />}
-                        {h?.installed ? `CLI 已就绪` : `未检测到 ${p.command}`}
+                        {h?.installed
+                          ? tr('CLI 已就绪', 'CLI Ready')
+                          : tr(`未检测到 ${p.command}`, `${p.command} not found`)}
                       </span>
                     )}
 
@@ -801,7 +831,7 @@ export const ProvidersModal: React.FC<ProvidersModalProps> = ({
                       <button
                         type="button"
                         className="btn btn-sm"
-                        title="删除此模型"
+                        title={tr('删除此模型', 'Delete model')}
                         onClick={() => removeProvider(idx)}
                       >
                         <Trash2 size={12} />
@@ -813,7 +843,7 @@ export const ProvidersModal: React.FC<ProvidersModalProps> = ({
                 {/* Common row: Display Name + Relay + Connection Mode */}
                 <div className="grid-2" style={{ marginTop: 10 }}>
                   <div className="field" style={{ marginBottom: 8 }}>
-                    <label>显示名称（默认自动用「模型名」或「模型名 (中转名)」）</label>
+                    <label>{tr('显示名称（默认自动用「模型名」或「模型名 (中转名)」）', 'Display Name')}</label>
                     <input
                       className="input"
                       value={p.shortName}
@@ -823,10 +853,10 @@ export const ProvidersModal: React.FC<ProvidersModalProps> = ({
                     />
                   </div>
                   <div className="field" style={{ marginBottom: 8 }}>
-                    <label>中转 / 平台名（可选，如 WorkBuddy / OpenRouter）</label>
+                    <label>{tr('中转 / 平台名（可选，如 WorkBuddy / OpenRouter）', 'Relay / Platform (optional)')}</label>
                     <input
                       className="input"
-                      placeholder="直连官方留空；中转填名称，自动加括号"
+                      placeholder={tr('直连官方留空；中转填名称，自动加括号', 'Leave blank for direct; relay name adds suffix')}
                       value={p.relayName || ''}
                       onChange={(e) => updateField(idx, { relayName: e.target.value })}
                     />
@@ -834,7 +864,7 @@ export const ProvidersModal: React.FC<ProvidersModalProps> = ({
                 </div>
 
                 <div className="field" style={{ marginBottom: 8 }}>
-                  <label>接入方式（订阅制 CLI 或 API）</label>
+                  <label>{tr('接入方式（订阅制 CLI 或 API）', 'Connection Type (CLI or Direct API)')}</label>
                   <select
                     className="select"
                     value={connType}
@@ -842,11 +872,11 @@ export const ProvidersModal: React.FC<ProvidersModalProps> = ({
                       switchConnectionType(idx, e.target.value as ProviderConnectionType)
                     }
                   >
-                    <option value="cli">订阅制（调用本机官方 CLI / Ollama）</option>
-                    <option value="openai_api">API · OpenAI 兼容（OpenAI / DeepSeek / Kimi / Qwen / 中转）</option>
-                    <option value="azure_openai">API · Azure OpenAI（api-key 头 + Deployment 部署名）</option>
-                    <option value="anthropic_api">API · Anthropic（Claude 官方或兼容代理）</option>
-                    <option value="gemini_api">API · Google Gemini REST</option>
+                    <option value="cli">{tr('订阅制（调用本机官方 CLI / Ollama）', 'Subscription (Local CLI / Ollama)')}</option>
+                    <option value="openai_api">{tr('API · OpenAI 兼容（OpenAI / DeepSeek / Kimi / Qwen / 中转）', 'API · OpenAI-Compatible (OpenAI / DeepSeek / OpenRouter)')}</option>
+                    <option value="azure_openai">{tr('API · Azure OpenAI（api-key 头 + Deployment 部署名）', 'API · Azure OpenAI (api-key + Deployment)')}</option>
+                    <option value="anthropic_api">{tr('API · Anthropic（Claude 官方或兼容代理）', 'API · Anthropic (Claude Official or Proxy)')}</option>
+                    <option value="gemini_api">{tr('API · Google Gemini REST', 'API · Google Gemini REST')}</option>
                   </select>
                 </div>
 
@@ -971,7 +1001,7 @@ export const ProvidersModal: React.FC<ProvidersModalProps> = ({
                           onClick={() => void handleTestApi(p)}
                         >
                           <PlugZap size={14} />
-                          {testState?.testing ? '测试中...' : '测试连通性'}
+                          {testState?.testing ? tr('测试中...', 'Testing...') : tr('测试连通性', 'Test Connection')}
                         </button>
                       </div>
                     </div>
@@ -994,7 +1024,7 @@ export const ProvidersModal: React.FC<ProvidersModalProps> = ({
                   <>
                     <div className="grid-2">
                       <div className="field" style={{ marginBottom: 8 }}>
-                        <label>CLI 命令名</label>
+                        <label>{tr('CLI 命令名', 'CLI Command')}</label>
                         <input
                           className="input"
                           value={p.command}
@@ -1002,7 +1032,7 @@ export const ProvidersModal: React.FC<ProvidersModalProps> = ({
                         />
                       </div>
                       <div className="field" style={{ marginBottom: 8 }}>
-                        <label>CLI 参数（空格分隔）</label>
+                        <label>{tr('CLI 参数（空格分隔）', 'CLI Args (space-separated)')}</label>
                         <input
                           className="input"
                           value={p.args.join(' ')}
@@ -1017,16 +1047,16 @@ export const ProvidersModal: React.FC<ProvidersModalProps> = ({
 
                     <div className="grid-2">
                       <div className="field" style={{ marginBottom: 8 }}>
-                        <label>指定模型名（可选，留空走订阅默认）</label>
+                        <label>{tr('指定模型名（可选，留空走订阅默认）', 'Model ID (optional, blank for default)')}</label>
                         <input
                           className="input"
-                          placeholder="留空默认"
+                          placeholder={tr('留空默认', 'Default')}
                           value={p.model || ''}
                           onChange={(e) => updateField(idx, { model: e.target.value })}
                         />
                       </div>
                       <div className="field" style={{ marginBottom: 8 }}>
-                        <label>提示词传入方式 & 超时（秒）</label>
+                        <label>{tr('提示词传入方式 & 超时（秒）', 'Prompt Input & Timeout (s)')}</label>
                         <div style={{ display: 'flex', gap: 6 }}>
                           <select
                             className="select"
@@ -1037,8 +1067,8 @@ export const ProvidersModal: React.FC<ProvidersModalProps> = ({
                               })
                             }
                           >
-                            <option value="stdin">stdin 管道</option>
-                            <option value="arg">命令行参数</option>
+                            <option value="stdin">{tr('stdin 管道', 'stdin pipe')}</option>
+                            <option value="arg">{tr('命令行参数', 'CLI arg')}</option>
                           </select>
                           <input
                             type="number"
@@ -1057,7 +1087,9 @@ export const ProvidersModal: React.FC<ProvidersModalProps> = ({
 
                     <div className="provider-guide-box">
                       <div className="provider-guide-head">
-                        <strong>操作步骤（{h?.installed ? '已检测到本机 CLI' : '按步骤 1 → 2 → 3 完成配置'}）</strong>
+                        <strong>
+                          {tr('操作步骤', 'Setup Steps')} ({h?.installed ? tr('已检测到本机 CLI', 'CLI detected') : tr('按步骤 1 → 2 → 3 完成配置', 'Follow steps 1 → 2 → 3')})
+                        </strong>
                         <div className="provider-quick-links">
                           {guide.docsUrl && (
                             <button
@@ -1065,7 +1097,7 @@ export const ProvidersModal: React.FC<ProvidersModalProps> = ({
                               className="btn btn-sm"
                               onClick={() => openExternal(guide.docsUrl!)}
                             >
-                              <span>{guide.docsLabel || '官方文档'}</span>
+                              <span>{guide.docsLabel || tr('官方文档', 'Docs')}</span>
                               <ExternalLink size={11} />
                             </button>
                           )}
@@ -1082,7 +1114,7 @@ export const ProvidersModal: React.FC<ProvidersModalProps> = ({
                               }
                             >
                               <KeyRound size={11} />
-                              <span>{guide.switchToApi.label}</span>
+                              <span>{tr(guide.switchToApi.label, 'Switch to Direct API')}</span>
                             </button>
                           )}
                           <button
@@ -1092,7 +1124,7 @@ export const ProvidersModal: React.FC<ProvidersModalProps> = ({
                             onClick={() => void runHealthCheck()}
                           >
                             <RefreshCw size={11} className={checking ? 'spin' : ''} />
-                            <span>刷新状态</span>
+                            <span>{tr('刷新状态', 'Refresh')}</span>
                           </button>
                         </div>
                       </div>
@@ -1108,7 +1140,7 @@ export const ProvidersModal: React.FC<ProvidersModalProps> = ({
                           {p.installCmd && (
                             <div className="provider-cmd-row">
                               <span className="provider-cmd-text">
-                                <strong>① 安装：</strong>
+                                <strong>{tr('① 安装：', '① Install: ')}</strong>
                                 <code>{p.installCmd}</code>
                               </span>
                               <div className="provider-cmd-actions">
@@ -1117,11 +1149,11 @@ export const ProvidersModal: React.FC<ProvidersModalProps> = ({
                                     type="button"
                                     className="btn btn-sm btn-primary"
                                     onClick={() =>
-                                      void launchInTerminal(p.id, p.installCmd, `${p.shortName} 安装`)
+                                      void launchInTerminal(p.id, p.installCmd, `${p.shortName} Install`)
                                     }
                                   >
                                     <Terminal size={11} />
-                                    <span>终端运行</span>
+                                    <span>{tr('终端运行', 'Run in Terminal')}</span>
                                   </button>
                                 )}
                                 <button
@@ -1129,24 +1161,24 @@ export const ProvidersModal: React.FC<ProvidersModalProps> = ({
                                   className="btn btn-sm"
                                   title={
                                     copyOpenTerminal
-                                      ? '复制命令并自动打开本机终端（不自动执行，粘贴确认后回车）'
-                                      : '仅复制命令到剪贴板'
+                                      ? tr('复制命令并自动打开本机终端（不自动执行，粘贴确认后回车）', 'Copy command & open local terminal')
+                                      : tr('仅复制命令到剪贴板', 'Copy command to clipboard')
                                   }
                                   onClick={() =>
                                     void copyCmd(`${p.id}-install`, p.installCmd, {
                                       providerId: p.id,
-                                      title: `${p.shortName} 安装`,
+                                      title: `${p.shortName} Install`,
                                     })
                                   }
                                 >
                                   <Copy size={11} />
                                   {copiedKey === `${p.id}-install`
                                     ? copyOpenTerminal
-                                      ? '已复制并开终端'
-                                      : '已复制'
+                                      ? tr('已复制并开终端', 'Copied + Opened')
+                                      : tr('已复制', 'Copied')
                                     : copyOpenTerminal
-                                      ? '复制并开终端'
-                                      : '复制'}
+                                      ? tr('复制并开终端', 'Copy + Terminal')
+                                      : tr('复制', 'Copy')}
                                 </button>
                               </div>
                             </div>
@@ -1154,7 +1186,7 @@ export const ProvidersModal: React.FC<ProvidersModalProps> = ({
                           {p.loginCmd && (
                             <div className="provider-cmd-row">
                               <span className="provider-cmd-text">
-                                <strong>② 登录：</strong>
+                                <strong>{tr('② 登录：', '② Sign In: ')}</strong>
                                 <code>{p.loginCmd}</code>
                               </span>
                               <div className="provider-cmd-actions">
@@ -1163,11 +1195,11 @@ export const ProvidersModal: React.FC<ProvidersModalProps> = ({
                                     type="button"
                                     className="btn btn-sm btn-ink"
                                     onClick={() =>
-                                      void launchInTerminal(p.id, p.loginCmd, `${p.shortName} 登录`)
+                                      void launchInTerminal(p.id, p.loginCmd, `${p.shortName} Sign In`)
                                     }
                                   >
                                     <Terminal size={11} />
-                                    <span>终端运行</span>
+                                    <span>{tr('终端运行', 'Run in Terminal')}</span>
                                   </button>
                                 )}
                                 <button
@@ -1175,24 +1207,24 @@ export const ProvidersModal: React.FC<ProvidersModalProps> = ({
                                   className="btn btn-sm"
                                   title={
                                     copyOpenTerminal
-                                      ? '复制命令并自动打开本机终端（不自动执行，粘贴确认后回车）'
-                                      : '仅复制命令到剪贴板'
+                                      ? tr('复制命令并自动打开本机终端（不自动执行，粘贴确认后回车）', 'Copy command & open local terminal')
+                                      : tr('仅复制命令到剪贴板', 'Copy command to clipboard')
                                   }
                                   onClick={() =>
                                     void copyCmd(`${p.id}-login`, p.loginCmd, {
                                       providerId: p.id,
-                                      title: `${p.shortName} 登录`,
+                                      title: `${p.shortName} Sign In`,
                                     })
                                   }
                                 >
                                   <Copy size={11} />
                                   {copiedKey === `${p.id}-login`
                                     ? copyOpenTerminal
-                                      ? '已复制并开终端'
-                                      : '已复制'
+                                      ? tr('已复制并开终端', 'Copied + Opened')
+                                      : tr('已复制', 'Copied')
                                     : copyOpenTerminal
-                                      ? '复制并开终端'
-                                      : '复制'}
+                                      ? tr('复制并开终端', 'Copy + Terminal')
+                                      : tr('复制', 'Copy')}
                                 </button>
                               </div>
                             </div>
@@ -1213,11 +1245,11 @@ export const ProvidersModal: React.FC<ProvidersModalProps> = ({
 
         <div className="modal-footer">
           <button className="btn" onClick={onClose}>
-            取消
+            {tr('取消', 'Cancel')}
           </button>
           <button className="btn btn-primary" onClick={handleSave} disabled={saving}>
             <Save size={14} />
-            {saving ? '保存中...' : '保存模型池'}
+            {saving ? tr('保存中...', 'Saving...') : tr('保存模型池', 'Save Model Pool')}
           </button>
         </div>
       </div>

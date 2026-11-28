@@ -1,6 +1,6 @@
 # RINNE RELAY (TIMELESS // STUDIO) — Multi-Agent Local Group Chatroom & Visual Workflow Orchestrator
 
-> Pure local-first (`127.0.0.1:4310`) multi-model collaboration desktop app & visual workflow studio — strictly bound to localhost, zero cloud upload, featuring original operator mascot **Rinne (环音)** and a **Claude Canvas**-style split-pane DAG orchestrator.
+> Pure local-first multi-model collaboration desktop app & visual workflow studio — strictly bound to `localhost`, zero cloud upload, featuring original operator mascot **Rinne (环音)** and a **Claude Canvas**-style split-pane DAG orchestrator.
 
 Bring **Claude**, **DeepSeek**, **Doubao**, **Gemini / Antigravity (`agy`)**, **Codex / GPT**, **Ollama**, **WorkBuddy**, and **AWS Quick** into one unified local multi-agent studio — `@mention` models in parallel, let them auto-relay or debate, orchestrate 12-node visual DAG workflows with real-time progress HUDs, inspect/edit local workspace code & Git diffs side-by-side, and keep GUI agents responsive with **0-token keep-alive long-polling**, **built-in MCP**, or **single-turn folder File-Bridge**.
 
@@ -8,6 +8,8 @@ Bring **Claude**, **DeepSeek**, **Doubao**, **Gemini / Antigravity (`agy`)**, **
 
 ## What's New (Latest Update)
 
+- **Live Bilingual UI (`简体中文 / English`)**
+  - Instant topbar `[ 中 | EN ]` switcher covering the chatroom shell, sidebar, composer, visual workflow canvas, workspace pane, and all modals, persisted locally with zero reload.
 - **Separated Formal Feed & Live Waiting Tray (`正式消息流` 与 `接单与处理中` 彻底分离)**
   - Formal message cards render only finished/error replies in **strict actual reply arrival order** (whoever replies first lands first, with clean stage headers).
   - Pending / thinking / bridge-waiting replies live in a compact bottom **Live Waiting Tray** with real-time elapsed timers, per-message cancel, 35s stall/confirmation-dialog warning, and inline **manual paste reply** fallback.
@@ -47,7 +49,7 @@ Bring **Claude**, **DeepSeek**, **Doubao**, **Gemini / Antigravity (`agy`)**, **
   - **Global `chatroom` CLI (`CLI-Anything` style)**: `chatroom join / wait / pull / reply / send / status / stop-wait` with `--json` output.
   - **0-Token Streaming Heartbeat Long-Poll (`chatroom wait --heartbeat 15`)**: NDJSON heartbeat stream prevents terminal idle timeouts with 0 LLM tokens, auto-reconnects on server restart, and supports 1-click remote **`停等`**.
   - **Single-Turn Folder File-Bridge**: Mirrors pending tasks to `~/chatroom-bridge/<agentId>/tasks/*.json`, watches `replies/*.json|.md` (`< 1s` delivery & auto-cleanup), and supports inline manual paste fallback.
-  - **Local MCP Endpoint**: Streamable HTTP / JSON-RPC MCP server built right into `127.0.0.1:4310`.
+  - **Local MCP Endpoint**: Built-in Streamable HTTP / JSON-RPC MCP server on `localhost`.
 - **Workbench Extensions & Built-In Diagnostics**
   - Manage per-member **Skills (`/`)** with 3-way external import, **MCP / CLI Plugins**, **Global Knowledge Base**, **Prompt Templates & Schedules**, plus an in-app **「连接诊断与常见问题解决」** center.
 

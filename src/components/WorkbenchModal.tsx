@@ -26,6 +26,7 @@ import type {
   WorkflowTemplate,
 } from '../../shared/types';
 import { api } from '../api';
+import { useI18n } from '../i18n';
 
 export type WorkbenchModalTab = 'skills' | 'plugins' | 'knowledge' | 'automation';
 
@@ -223,6 +224,7 @@ export const WorkbenchModal: React.FC<WorkbenchModalProps> = ({
   onRunSchedule,
   onInsertPrompt,
 }) => {
+  const { tr } = useI18n();
   const [tab, setTab] = useState<WorkbenchModalTab>(initialTab);
   const [autoSubTab, setAutoSubTab] = useState<'templates' | 'schedules'>('templates');
   const [expandedId, setExpandedId] = useState<string | null>(null);
@@ -650,7 +652,7 @@ export const WorkbenchModal: React.FC<WorkbenchModalProps> = ({
               onClick={() => switchTab('skills')}
             >
               <Sparkles size={13} />
-              <span>技能</span>
+              <span>{tr('技能', 'Skills')}</span>
             </button>
             <button
               type="button"
@@ -658,7 +660,7 @@ export const WorkbenchModal: React.FC<WorkbenchModalProps> = ({
               onClick={() => switchTab('plugins')}
             >
               <Blocks size={13} />
-              <span>插件 / MCP</span>
+              <span>{tr('插件 / MCP', 'Plugins / MCP')}</span>
             </button>
             <button
               type="button"
@@ -666,7 +668,7 @@ export const WorkbenchModal: React.FC<WorkbenchModalProps> = ({
               onClick={() => switchTab('knowledge')}
             >
               <BookOpen size={13} />
-              <span>资料库</span>
+              <span>{tr('资料库', 'Knowledge')}</span>
             </button>
             <button
               type="button"
@@ -674,10 +676,10 @@ export const WorkbenchModal: React.FC<WorkbenchModalProps> = ({
               onClick={() => switchTab('automation')}
             >
               <Clock size={13} />
-              <span>模板与定时</span>
+              <span>{tr('模板与定时', 'Templates & Cron')}</span>
             </button>
           </div>
-          <button type="button" className="mini-icon-btn" onClick={onClose} title="关闭">
+          <button type="button" className="mini-icon-btn" onClick={onClose} title={tr('关闭', 'Close')}>
             <X size={16} />
           </button>
         </div>
@@ -694,7 +696,7 @@ export const WorkbenchModal: React.FC<WorkbenchModalProps> = ({
                   setShowAddForm(false);
                 }}
               >
-                快捷模板 ({workbench.templates.length})
+                {tr('快捷模板', 'Templates')} ({workbench.templates.length})
               </button>
               <button
                 type="button"
@@ -704,14 +706,14 @@ export const WorkbenchModal: React.FC<WorkbenchModalProps> = ({
                   setShowAddForm(false);
                 }}
               >
-                定时任务 ({workbench.schedules.length})
+                {tr('定时任务', 'Schedules')} ({workbench.schedules.length})
               </button>
             </div>
           ) : (
             <span className="wb-toolbar-hint">
-              {tab === 'skills' && '点击开关启用，或在聊天框输入 / 快捷调用'}
-              {tab === 'plugins' && '一键添加常用 MCP 或本地工具，开箱即用'}
-              {tab === 'knowledge' && '开启开关后自动共享给所有模型，也支持直接拖文件进聊天框'}
+              {tab === 'skills' && tr('点击开关启用，或在聊天框输入 / 快捷调用', 'Toggle to enable, or type / in chat to invoke')}
+              {tab === 'plugins' && tr('一键添加常用 MCP 或本地工具，开箱即用', 'One-click MCP servers or local CLI tools')}
+              {tab === 'knowledge' && tr('开启开关后自动共享给所有模型，也支持直接拖文件进聊天框', 'Pinned docs are shared with all models automatically')}
             </span>
           )}
 
@@ -732,7 +734,7 @@ export const WorkbenchModal: React.FC<WorkbenchModalProps> = ({
                   onClick={openSkillImportDrawer}
                 >
                   <FileUp size={13} />
-                  导入 Skill
+                  {tr('导入 Skill', 'Import Skill')}
                 </button>
               </>
             )}
@@ -751,7 +753,7 @@ export const WorkbenchModal: React.FC<WorkbenchModalProps> = ({
                   onClick={() => fileInputRef.current?.click()}
                 >
                   <FileUp size={13} />
-                  导入文件
+                  {tr('导入文件', 'Import File')}
                 </button>
               </>
             )}
@@ -764,7 +766,7 @@ export const WorkbenchModal: React.FC<WorkbenchModalProps> = ({
               }}
             >
               <Plus size={13} />
-              添加
+              {tr('添加', 'Add')}
             </button>
           </div>
         </div>
@@ -783,21 +785,21 @@ export const WorkbenchModal: React.FC<WorkbenchModalProps> = ({
                       if (discoveredSkills.length === 0) void runDiscoverLocalSkills();
                     }}
                   >
-                    扫描本机
+                    {tr('扫描本机', 'Scan Local')}
                   </button>
                   <button
                     type="button"
                     className={skillImportMode === 'file' ? 'active' : ''}
                     onClick={() => setSkillImportMode('file')}
                   >
-                    导入文件
+                    {tr('导入文件', 'From File')}
                   </button>
                   <button
                     type="button"
                     className={skillImportMode === 'url' ? 'active' : ''}
                     onClick={() => setSkillImportMode('url')}
                   >
-                    链接导入
+                    {tr('链接导入', 'From URL')}
                   </button>
                 </div>
                 <button

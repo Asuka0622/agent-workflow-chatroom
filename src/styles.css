@@ -3869,6 +3869,42 @@ body,
   color: var(--text-primary);
 }
 
+/* ===== Topbar Bilingual Language Switcher (zh-CN / EN) ===== */
+.studio-lang-switch {
+  display: inline-flex;
+  align-items: center;
+  padding: 2px;
+  border-radius: 6px;
+  border: 1px solid var(--border);
+  background: var(--bg-subtle);
+  gap: 2px;
+  height: 28px;
+}
+
+.studio-lang-btn {
+  border: none;
+  background: transparent;
+  color: var(--text-muted);
+  font-family: inherit;
+  font-size: 11px;
+  font-weight: 700;
+  padding: 0 7px;
+  height: 22px;
+  border-radius: 4px;
+  cursor: pointer;
+  line-height: 1;
+  transition: background 0.15s ease, color 0.15s ease;
+}
+
+.studio-lang-btn:hover {
+  color: var(--text-primary);
+}
+
+.studio-lang-btn.active {
+  background: var(--ink, #111827);
+  color: #ffffff;
+}
+
 .wf-cat-tabs {
   display: flex;
   align-items: center;
@@ -9167,4 +9203,40 @@ button.jr-contents-head span {
 /* No dock art yet: the halo alone stands in for Rinne */
 .rinne-dock .rinne-placeholder {
   display: none;
+}
+
+/* Bilingual & narrow-split layout guards */
+.studio-section-count {
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+
+.studio-topbar-left {
+  min-width: 0;
+  flex: 1 1 auto;
+  overflow: hidden;
+}
+
+.studio-topbar-right {
+  flex-shrink: 0;
+}
+
+.cc-header {
+  gap: 8px;
+}
+
+.cc-header-left {
+  min-width: 0;
+  flex: 1 1 auto;
+  overflow: hidden;
+}
+
+.cc-header-left .cc-tpl-select {
+  min-width: 72px;
+  flex: 1 1 110px;
+  max-width: 190px;
+}
+
+.cc-header-right {
+  flex-shrink: 0;
 }

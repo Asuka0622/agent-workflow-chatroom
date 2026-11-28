@@ -30,6 +30,16 @@ export const RINNE_LINES: Record<RinneState, string> = {
   sleep: '大家都不在线…我先眯一会儿。',
 };
 
+export const RINNE_LINES_EN: Record<RinneState, string> = {
+  idle: 'Wired in and standing by.',
+  listening: 'Members are listening — ready to relay.',
+  working: 'Collaborating now…',
+  approval: 'Ready for your final call.',
+  error: 'Line issue detected — check diagnostics?',
+  done: 'Done and archived.',
+  sleep: 'Everyone is offline… taking a quick nap.',
+};
+
 const EYE_MOOD: Partial<Record<RinneState, EyeMood>> = { working: 'busy', approval: 'approval', error: 'error' };
 
 export const RinneMascot: React.FC<RinneMascotProps> = ({ variant, state = 'idle', line }) => {

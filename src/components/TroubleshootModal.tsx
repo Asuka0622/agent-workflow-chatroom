@@ -14,6 +14,7 @@ import {
 } from 'lucide-react';
 import type { ConnectedAgent } from '../../shared/types';
 import { MemberAvatar } from './MemberAvatar';
+import { useI18n } from '../i18n';
 
 export function buildStandbyPrompt(agentId: string): string {
   return `请开启超长保活待命模式，帮我自动响应本地聊天室消息（单次等待 30 分钟仅占 1 轮调用，每 15 秒发保活心跳防断连、支持重启自动重连，全程 0 模型 token）：
@@ -124,6 +125,7 @@ export const TroubleshootModal: React.FC<TroubleshootModalProps> = ({
   onDetectCli,
   onToast,
 }) => {
+  const { tr } = useI18n();
   const [copiedId, setCopiedId] = useState('');
   const [detectingId, setDetectingId] = useState('');
 
@@ -140,7 +142,7 @@ export const TroubleshootModal: React.FC<TroubleshootModalProps> = ({
         <div className="modal-header">
           <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
             <Wrench size={15} />
-            <h2>连接诊断与常见问题解决</h2>
+            <h2>{tr('连接诊断与常见问题解决', 'Connection Diagnostics & Troubleshooting')}</h2>
             <span className="ef-index-tag">DIAG</span>
           </div>
           <button type="button" className="mini-icon-btn" onClick={onClose}>
@@ -154,7 +156,7 @@ export const TroubleshootModal: React.FC<TroubleshootModalProps> = ({
             <div className="diag-section-head">
               <span className="diag-section-title">
                 <Activity size={13} />
-                外部接入成员实时待命诊断（{agents.length}）
+                {tr(`外部接入成员实时待命诊断（${agents.length}）`, `Connected Agent Diagnostics (${agents.length})`)}
               </span>
               <button
                 type="button"
@@ -165,13 +167,16 @@ export const TroubleshootModal: React.FC<TroubleshootModalProps> = ({
                 }}
               >
                 <Settings2 size={11} />
-                检查模型池
+                {tr('检查模型池', 'Model Pool')}
               </button>
             </div>
 
             {agents.length === 0 ? (
               <div className="invite-empty">
-                当前没有外部接入的 Agent 成员；本地订阅 CLI / API 模型会自动由后台直接拉起，无需心跳待命。
+                {tr(
+                  '当前没有外部接入的 Agent 成员；本地订阅 CLI / API 模型会自动由后台直接拉起，无需心跳待命。',
+                  'No external agents connected yet. Local CLI and API models run automatically without standby.',
+                )}
               </div>
             ) : (
               <div className="diag-agent-list">
@@ -194,32 +199,32 @@ export const TroubleshootModal: React.FC<TroubleshootModalProps> = ({
                         <div className="diag-agent-top">
                           <strong>{a.name}</strong>
                           {!a.online ? (
-                            <span className="diag-pill is-off">已离线</span>
+                            <span className="diag-pill is-off">{tr('已离线', 'Offline')}</span>
                           ) : isCli ? (
                             <span className="diag-pill is-ok">
                               <CheckCircle2 size={10} />
-                              自动 CLI ({a.trigger?.type === 'cli' ? a.trigger.command : ''})
+                              {tr('自动 CLI', 'Auto CLI')} ({a.trigger?.type === 'cli' ? a.trigger.command : ''})
                             </span>
                           ) : isListening ? (
                             <span className="diag-pill is-live">
                               <Zap size={10} />
-                              保活心跳监听中（0 token）
+                              {tr('保活心跳监听中（0 token）', 'Live Standby (0 tokens)')}
                             </span>
                           ) : (
                             <span className="diag-pill is-warn">
                               <AlertTriangle size={10} />
-                              未开启保活待命（发消息需手动唤醒）
+                              {tr('未开启保活待命（发消息需手动唤醒）', 'Not on standby (manual wake needed)')}
                             </span>
                           )}
                         </div>
                         <div className="diag-agent-sub">
                           {needsStandby
-                            ? '解决：点右侧「复制保活指令」发给对方客户端，亮起 ⚡ 监听待命后即可自动秒回。'
+                            ? tr('解决：点右侧「复制保活指令」发给对方客户端，亮起 ⚡ 监听待命后即可自动秒回。', 'Fix: click "Copy Standby" on the right and send to the client to restore auto-reply.')
                             : isListening
-                              ? '状态健康：聊天室每 15 秒推送保活心跳，发消息时毫秒级自动唤醒，重启可自动重连。'
+                              ? tr('状态健康：聊天室每 15 秒推送保活心跳，发消息时毫秒级自动唤醒，重启可自动重连。', 'Healthy: 15s keepalive heartbeat active, instant wake, auto-reconnect on restart.')
                               : isCli
-                                ? '状态健康：已绑定本机 CLI，@ 它时后台直接自动执行。'
-                                : '成员当前处于离线状态，点击左侧栏头像可恢复在线。'}
+                                ? tr('状态健康：已绑定本机 CLI，@ 它时后台直接自动执行。', 'Healthy: bound to local CLI and runs automatically when @mentioned.')
+                                : tr('成员当前处于离线状态，点击左侧栏头像可恢复在线。', 'Member is offline. Click its sidebar row to bring it online.')}
                         </div>
                       </div>
 
@@ -231,7 +236,7 @@ export const TroubleshootModal: React.FC<TroubleshootModalProps> = ({
                             onClick={() => void onStopStandby(a.id, a.name)}
                           >
                             <Square size={11} />
-                            停等
+                            {tr('停等', 'Stop')}
                           </button>
                         ) : a.online && !isCli ? (
                           <>
@@ -241,7 +246,7 @@ export const TroubleshootModal: React.FC<TroubleshootModalProps> = ({
                               onClick={() => void copyStandby(a)}
                             >
                               <Copy size={11} />
-                              {copiedId === a.id ? '已复制' : '复制保活指令'}
+                              {copiedId === a.id ? tr('已复制', 'Copied') : tr('复制保活指令', 'Copy Standby')}
                             </button>
                             <button
                               type="button"

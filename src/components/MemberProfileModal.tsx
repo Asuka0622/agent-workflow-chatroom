@@ -2,6 +2,7 @@ import React, { useRef, useState } from 'react';
 import { Activity, Coins, ImagePlus, Power, RefreshCw, RotateCcw, Trash2, X } from 'lucide-react';
 import type { MemberQuotaConfig, MemberUsageRecord, QuotaTrackMode } from '../../shared/types';
 import { MemberAvatar, isImageAvatar } from './MemberAvatar';
+import { useI18n } from '../i18n';
 
 export type MemberPresence = 'working' | 'idle' | 'offline';
 
@@ -118,6 +119,7 @@ export const MemberProfileModal: React.FC<MemberProfileModalProps> = ({
   onResetUsage,
   onRefreshBalance,
 }) => {
+  const { tr } = useI18n();
   const [name, setName] = useState(member.name);
   const [avatar, setAvatar] = useState(member.avatar || '');
   const [color, setColor] = useState(member.color || '#18181b');
@@ -457,8 +459,8 @@ export const MemberProfileModal: React.FC<MemberProfileModalProps> = ({
         onClick={(e) => e.stopPropagation()}
       >
         <div className="modal-header">
-          <h2>成员详情与用量</h2>
-          <button type="button" className="mini-icon-btn" onClick={onClose} title="关闭">
+          <h2>{tr('成员详情与用量', 'Member Profile & Usage')}</h2>
+          <button type="button" className="mini-icon-btn" onClick={onClose} title={tr('关闭', 'Close')}>
             <X size={16} />
           </button>
         </div>
@@ -483,14 +485,14 @@ export const MemberProfileModal: React.FC<MemberProfileModalProps> = ({
                   <span className={`presence-pill is-${presence}`}>
                     <span className={`presence-dot ${presence}`} />
                     {presence === 'working'
-                      ? '工作中'
+                      ? tr('工作中', 'Working')
                       : presence === 'idle'
-                        ? '在线 · 空闲'
-                        : '离线'}
+                        ? tr('在线 · 空闲', 'Online · Idle')
+                        : tr('离线', 'Offline')}
                   </span>
                 </div>
                 <div className="member-edit-preview-meta">
-                  {member.subtitle || (member.kind === 'agent' ? '已接入外部模型' : '本地订阅 / API 模型')}
+                  {member.subtitle || (member.kind === 'agent' ? tr('已接入外部模型', 'Connected External Agent') : tr('本地订阅 / API 模型', 'Local CLI / API Model'))}
                 </div>
                 <div className="member-edit-upload-row">
                   <input
@@ -506,17 +508,17 @@ export const MemberProfileModal: React.FC<MemberProfileModalProps> = ({
                     onClick={() => fileRef.current?.click()}
                   >
                     <ImagePlus size={13} />
-                    上传图片
+                    {tr('上传图片', 'Upload Image')}
                   </button>
                   {avatar && (
                     <button
                       type="button"
                       className="btn btn-sm"
                       onClick={() => setAvatar('')}
-                      title="恢复默认首字母头像"
+                      title={tr('恢复默认首字母头像', 'Reset to default monogram')}
                     >
                       <RotateCcw size={12} />
-                      恢复默认
+                      {tr('恢复默认', 'Reset')}
                     </button>
                   )}
                   {onToggleOnline && (
@@ -525,10 +527,10 @@ export const MemberProfileModal: React.FC<MemberProfileModalProps> = ({
                       className="btn btn-sm"
                       disabled={toggling}
                       onClick={() => void handleTogglePresence()}
-                      title={presence === 'offline' ? '恢复在线状态' : '暂时设为离线'}
+                      title={presence === 'offline' ? tr('恢复在线状态', 'Bring back online') : tr('暂时设为离线', 'Set offline')}
                     >
                       <Power size={12} />
-                      {presence === 'offline' ? '恢复在线' : '设为离线'}
+                      {presence === 'offline' ? tr('恢复在线', 'Set Online') : tr('设为离线', 'Set Offline')}
                     </button>
                   )}
                 </div>
@@ -540,7 +542,7 @@ export const MemberProfileModal: React.FC<MemberProfileModalProps> = ({
               <div className="member-usage-head">
                 <div className="member-usage-title">
                   <Activity size={13} />
-                  <span>Token 消耗与剩余用量</span>
+                  <span>{tr('Token 消耗与剩余用量', 'Token Usage & Quota')}</span>
                   {member.channelTag && (
                     <span className="member-usage-tag">{member.channelTag}</span>
                   )}
@@ -552,10 +554,10 @@ export const MemberProfileModal: React.FC<MemberProfileModalProps> = ({
                       className="member-usage-mini-btn"
                       disabled={refreshingBal}
                       onClick={() => void handleRefreshBal()}
-                      title="查询 DeepSeek / OpenRouter 等官方账户余额"
+                      title={tr('查询 DeepSeek / OpenRouter 等官方账户余额', 'Fetch official API balance')}
                     >
                       <RefreshCw size={11} className={refreshingBal ? 'spin' : ''} />
-                      <span>刷新余额</span>
+                      <span>{tr('刷新余额', 'Refresh Balance')}</span>
                     </button>
                   )}
                   {onResetUsage && (usedTotal > 0 || usedCalls > 0) && (
@@ -563,12 +565,14 @@ export const MemberProfileModal: React.FC<MemberProfileModalProps> = ({
                       type="button"
                       className="member-usage-mini-btn"
                       onClick={() => {
-                        void onResetUsage().then(() => setQuotaMsg('已清空该成员的累计消耗计数'));
+                        void onResetUsage().then(() =>
+                          setQuotaMsg(tr('已清空该成员的累计消耗计数', 'Reset cumulative usage counters')),
+                        );
                       }}
-                      title="新周期开始时重置本地计数（保留配额设置）"
+                      title={tr('新周期开始时重置本地计数（保留配额设置）', 'Reset local usage counters for new billing period')}
                     >
                       <RotateCcw size={11} />
-                      <span>重置计数</span>
+                      <span>{tr('重置计数', 'Reset')}</span>
                     </button>
                   )}
                 </div>
@@ -576,7 +580,7 @@ export const MemberProfileModal: React.FC<MemberProfileModalProps> = ({
 
               <div className="member-usage-stats">
                 <div className="member-usage-metric">
-                  <span className="metric-label">累计消耗</span>
+                  <span className="metric-label">{tr('累计消耗', 'Total Used')}</span>
                   <strong className="metric-value">
                     {isAllEstimated ? '~' : ''}
                     {formatTokenCount(usedTotal)}
@@ -1006,12 +1010,12 @@ export const MemberProfileModal: React.FC<MemberProfileModalProps> = ({
 
             {/* Quick Rename */}
             <div className="field">
-              <label>显示名称（支持 @点名）</label>
+              <label>{tr('显示名称（支持 @点名）', 'Display Name (used for @mentions)')}</label>
               <input
                 className="input"
                 autoFocus
                 maxLength={48}
-                placeholder="输入聊天室中的显示名称，如 Claude / 主架构师"
+                placeholder={tr('输入聊天室中的显示名称，如 Claude / 主架构师', 'Display name in chatroom, e.g. Claude / Lead Architect')}
                 value={name}
                 onChange={(e) => setName(e.target.value)}
               />
@@ -1020,11 +1024,11 @@ export const MemberProfileModal: React.FC<MemberProfileModalProps> = ({
             {/* Preset Emoji / Glyph */}
             <div className="field">
               <div className="field-label-row">
-                <label style={{ margin: 0 }}>快捷图标 / Emoji</label>
+                <label style={{ margin: 0 }}>{tr('快捷图标 / Emoji', 'Quick Icon / Emoji')}</label>
                 <input
                   className="glyph-mini-input"
                   maxLength={4}
-                  placeholder="自填字/表情"
+                  placeholder={tr('自填字/表情', 'Char / Emoji')}
                   value={isImageAvatar(avatar) ? '' : avatar}
                   onChange={(e) => setAvatar(e.target.value)}
                 />
@@ -1045,7 +1049,7 @@ export const MemberProfileModal: React.FC<MemberProfileModalProps> = ({
 
             {/* Accent Color */}
             <div className="field" style={{ marginBottom: 0 }}>
-              <label>头像背景色</label>
+              <label>{tr('头像背景色', 'Avatar Color')}</label>
               <div className="color-swatch-row">
                 {PRESET_COLORS.map((c) => (
                   <button
@@ -1086,7 +1090,7 @@ export const MemberProfileModal: React.FC<MemberProfileModalProps> = ({
                           await onDelete();
                           onClose();
                         } catch (err) {
-                          setError(err instanceof Error ? err.message : '移除成员失败');
+                          setError(err instanceof Error ? err.message : tr('移除成员失败', 'Failed to remove member'));
                           setConfirmDelete(false);
                         } finally {
                           setDeleting(false);
@@ -1094,7 +1098,7 @@ export const MemberProfileModal: React.FC<MemberProfileModalProps> = ({
                       }}
                     >
                       <Trash2 size={13} />
-                      {deleting ? '移除中…' : '确认移除该成员'}
+                      {deleting ? tr('移除中…', 'Removing…') : tr('确认移除该成员', 'Confirm Remove')}
                     </button>
                     <button
                       type="button"
@@ -1102,7 +1106,7 @@ export const MemberProfileModal: React.FC<MemberProfileModalProps> = ({
                       disabled={deleting}
                       onClick={() => setConfirmDelete(false)}
                     >
-                      取消
+                      {tr('取消', 'Cancel')}
                     </button>
                   </>
                 ) : (
@@ -1112,21 +1116,21 @@ export const MemberProfileModal: React.FC<MemberProfileModalProps> = ({
                     onClick={() => setConfirmDelete(true)}
                   >
                     <Trash2 size={13} />
-                    移除成员
+                    {tr('移除成员', 'Remove')}
                   </button>
                 )}
               </div>
             )}
             <div style={{ display: 'flex', gap: 8 }}>
               <button type="button" className="btn" onClick={onClose}>
-                取消
+                {tr('取消', 'Cancel')}
               </button>
               <button
                 type="submit"
                 className="btn btn-ink"
                 disabled={saving || deleting || !name.trim()}
               >
-                {saving ? '保存中...' : '保存修改'}
+                {saving ? tr('保存中...', 'Saving...') : tr('保存修改', 'Save Changes')}
               </button>
             </div>
           </div>
