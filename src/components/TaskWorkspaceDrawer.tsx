@@ -343,8 +343,8 @@ export const TaskWorkspaceDrawer: React.FC<TaskWorkspaceDrawerProps> = ({
     <aside className="task-drawer">
       <div className="stage-drawer-head">
         <div>
-          <div style={{ fontWeight: 700, fontSize: 14 }}>任务看板与资料库</div>
-          <div style={{ fontSize: 11.5, color: '#6b7280', marginTop: 1 }}>
+          <div className="td-title">任务看板与资料库</div>
+          <div className="td-sub">
             进度 {progressStats.completed}/{progressStats.total} · 资料{' '}
             {manualMaterials.length + stageArtifacts.length} 份
           </div>
@@ -402,7 +402,7 @@ export const TaskWorkspaceDrawer: React.FC<TaskWorkspaceDrawerProps> = ({
           <div className="progress-panel">
             <div className="progress-summary-card">
               <div className="progress-summary-top">
-                <span style={{ fontWeight: 700, fontSize: 13 }}>
+                <span className="td-state">
                   {progressStats.waiting
                     ? '等待人工拍板'
                     : progressStats.running
@@ -425,15 +425,13 @@ export const TaskWorkspaceDrawer: React.FC<TaskWorkspaceDrawerProps> = ({
 
               {run?.requirement ? (
                 <div className="progress-req-box">
-                  <div style={{ fontSize: 11, color: '#6b7280', marginBottom: 2 }}>
-                    当前任务目标
-                  </div>
-                  <div style={{ fontSize: 12.5, color: '#1f2937', lineHeight: 1.45 }}>
+                  <div className="td-label">当前任务目标</div>
+                  <div className="td-req">
                     {run.requirement}
                   </div>
                 </div>
               ) : (
-                <div style={{ fontSize: 12, color: '#6b7280', marginTop: 8 }}>
+                <div className="td-hint">
                   在群聊输入框写需求并点「按板块跑流程」，这里会实时可视化追踪每一步进度。
                 </div>
               )}
@@ -572,7 +570,7 @@ export const TaskWorkspaceDrawer: React.FC<TaskWorkspaceDrawerProps> = ({
                   {previewDoc.title}
                 </div>
                 {previewDoc.subtitle && (
-                  <div style={{ fontSize: 11.5, color: '#6b7280', marginBottom: 10 }}>
+                  <div className="td-sub td-doc-sub">
                     {previewDoc.subtitle}
                   </div>
                 )}
@@ -950,10 +948,10 @@ export const TaskWorkspaceDrawer: React.FC<TaskWorkspaceDrawerProps> = ({
                     )}
                     {node.subtitle}
                     {state?.status === 'completed' && (
-                      <span style={{ color: '#16a34a', marginLeft: 6 }}>✓ 已完成</span>
+                      <span className="td-badge is-done">✓ 已完成</span>
                     )}
                     {state?.status === 'running' && (
-                      <span style={{ color: '#2563eb', marginLeft: 6 }}>● 运行中</span>
+                      <span className="td-badge is-running">● 运行中</span>
                     )}
                   </div>
 

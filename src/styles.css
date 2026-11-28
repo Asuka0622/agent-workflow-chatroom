@@ -5286,6 +5286,189 @@ body,
   border-radius: 3px !important;
 }
 
+/* ===== Sidebar Inline Click-to-Expand Member Info Card ===== */
+.studio-member-wrap {
+  display: flex;
+  flex-direction: column;
+}
+
+.studio-member.is-expanded {
+  background: var(--bg-elevated);
+  color: var(--text);
+  box-shadow: inset 2px 0 0 var(--ef-blue);
+}
+
+.member-quick-card {
+  margin: 2px 4px 6px 10px;
+  padding: 8px 9px;
+  border-radius: 4px;
+  border: 1px solid var(--border);
+  border-left: 2px solid var(--ef-blue);
+  background: var(--bg-elevated);
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+  animation: efFadeIn 0.14s ease-out;
+}
+
+@keyframes efFadeIn {
+  from {
+    opacity: 0;
+    transform: translateY(-3px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.mqc-meta {
+  font-size: 10.5px;
+  color: var(--text-muted);
+  line-height: 1.4;
+}
+
+.mqc-stats {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 6px 7px;
+  border-radius: 3px;
+  background: var(--bg-subtle);
+  border: 1px solid var(--border);
+}
+
+.mqc-stat-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 6px;
+  font-size: 10.5px;
+}
+
+.mqc-label {
+  color: var(--text-muted);
+  flex-shrink: 0;
+}
+
+.mqc-val {
+  font-family: 'JetBrains Mono', 'Cascadia Code', ui-monospace, monospace;
+  font-size: 10.5px;
+  color: var(--text);
+  font-weight: 600;
+  text-align: right;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.mqc-val.is-accent {
+  color: #10b981;
+}
+
+.mqc-val.is-muted {
+  color: var(--text-muted);
+  font-family: inherit;
+  font-weight: 500;
+}
+
+.mqc-bar-track {
+  height: 4px;
+  border-radius: 2px;
+  background: var(--bg-elevated);
+  overflow: hidden;
+  margin-top: 2px;
+}
+
+.mqc-bar-fill {
+  height: 100%;
+  background: var(--ef-blue);
+}
+
+.mqc-bar-fill.is-warn {
+  background: #f59e0b;
+}
+
+.mqc-bar-fill.is-danger {
+  background: #ef4444;
+}
+
+.mqc-msgs {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+}
+
+.mqc-msgs-head {
+  font-size: 10px;
+  font-weight: 650;
+  color: var(--text-muted);
+  letter-spacing: 0.03em;
+}
+
+.mqc-msg-item {
+  padding: 5px 6px;
+  border-radius: 3px;
+  background: var(--bg-subtle);
+  border: 1px solid var(--border);
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.mqc-msg-top {
+  display: flex;
+  justify-content: space-between;
+  font-size: 10px;
+  color: var(--text-muted);
+  font-family: 'JetBrains Mono', ui-monospace, monospace;
+}
+
+.mqc-msg-text {
+  font-size: 11px;
+  line-height: 1.4;
+  color: var(--text-secondary);
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
+.mqc-actions {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+}
+
+.mqc-btn {
+  flex: 1;
+  height: 23px;
+  padding: 0 6px;
+  border-radius: 3px;
+  border: 1px solid var(--border-strong);
+  background: var(--bg-subtle);
+  color: var(--text-secondary);
+  font-family: inherit;
+  font-size: 10.5px;
+  font-weight: 500;
+  cursor: pointer;
+  white-space: nowrap;
+  transition: all 0.14s ease;
+}
+
+.mqc-btn:hover {
+  color: var(--text);
+  background: var(--bg-hover);
+}
+
+.mqc-btn.is-primary {
+  flex: 0 0 auto;
+  background: var(--ink);
+  color: var(--ink-text);
+  border-color: var(--ink);
+  font-weight: 600;
+}
+
 /* ===== Per-Message Token Pill & Member Usage Telemetry ===== */
 .studio-ai-token-pill {
   display: inline-flex;
@@ -6039,22 +6222,12 @@ body,
   z-index: 2;
 }
 
-/* Layer 1: oversized hollow halftone typography + black data bars */
+/* Stage micro-label colour (eye caption) */
 .ef-ambient-stage {
-  --ef-bar: #0d0f14;
-  --ef-bar-dash: #f8fafc;
-  --ef-lemon: #e9d66b;
-  --ef-label: #dbe2ee;
-  --ef-cobalt: #2a4de6;
   --ef-micro: #5b6b8c;
 }
 
 [data-theme='dark'] .ef-ambient-stage {
-  --ef-bar: #dfe5ef;
-  --ef-bar-dash: #0b0d13;
-  --ef-lemon: #f4e27a;
-  --ef-label: #1f2937;
-  --ef-cobalt: #5b7bff;
   --ef-micro: #8b96b0;
 }
 
@@ -7840,4 +8013,424 @@ button.jr-contents-head span {
 /* No dock art yet: the halo alone stands in for Rinne */
 .rinne-dock .rinne-placeholder {
   display: none;
+}
+
+/* ===== JOURNAL: task drawer = the editor's desk (progress, materials, stage line-up) ===== */
+.task-drawer {
+  background: var(--jr-grain), var(--jr-paper);
+  border-left: 1px solid var(--jr-rule);
+  color: var(--jr-ink);
+}
+
+.task-drawer .stage-drawer-head {
+  border-bottom: 2px solid var(--jr-rule);
+}
+
+.td-title {
+  font-family: var(--font-serif-cjk);
+  font-size: 15px;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  color: var(--jr-ink);
+}
+
+.td-sub {
+  margin-top: 2px;
+  font-family: var(--font-mono);
+  font-size: var(--fs-label-s);
+  font-weight: 700;
+  letter-spacing: 0.1em;
+  color: var(--jr-ink-soft);
+}
+
+.td-doc-sub {
+  margin-bottom: 10px;
+}
+
+/* Tabs: serif labels, cobalt underline */
+.task-drawer .ws-tabs {
+  border-bottom: 1px solid var(--jr-hair);
+}
+
+.task-drawer .ws-tab {
+  font-family: var(--font-serif-cjk);
+  font-size: 12.5px;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  color: var(--jr-ink-soft);
+}
+
+.task-drawer .ws-tab.active {
+  color: var(--jr-ink);
+  border-bottom-color: var(--ef-blue);
+}
+
+/* Progress summary: a mounted plate with a big Didone percentage */
+.task-drawer .progress-summary-card {
+  background: var(--jr-grain), var(--jr-paper-2);
+  border: 1px solid var(--jr-hair);
+  border-top: 2px solid var(--jr-ink);
+  border-radius: 2px;
+  box-shadow: 0 10px 18px -14px rgba(15, 23, 42, 0.35);
+}
+
+.td-state {
+  font-family: var(--font-serif-cjk);
+  font-size: 13.5px;
+  font-weight: 600;
+  color: var(--jr-ink);
+}
+
+.task-drawer .progress-pct {
+  font-family: var(--font-display);
+  font-size: 24px;
+  font-weight: 700;
+  line-height: 1;
+  color: var(--jr-ink);
+}
+
+.task-drawer .progress-bar-track {
+  height: 3px;
+  border-radius: 0;
+  background: var(--jr-hair);
+}
+
+.task-drawer .progress-bar-fill {
+  border-radius: 0;
+  background: var(--ef-blue);
+}
+
+.task-drawer .progress-req-box {
+  border-top: 1px solid var(--jr-hair);
+}
+
+.td-label {
+  margin-bottom: 3px;
+  font-family: var(--font-mono);
+  font-size: var(--fs-label-s);
+  font-weight: 700;
+  letter-spacing: 0.14em;
+  color: var(--jr-ink-soft);
+}
+
+.td-req {
+  font-family: var(--font-serif-cjk);
+  font-size: 13px;
+  line-height: 1.6;
+  color: var(--jr-ink);
+}
+
+.td-hint {
+  margin-top: 8px;
+  font-size: 12px;
+  line-height: 1.6;
+  color: var(--jr-ink-soft);
+}
+
+/* Lemon is reserved for "needs you": the approval call-to-action */
+.task-drawer .progress-summary-card .btn-primary {
+  background: var(--ef-yellow-bright);
+  border-color: var(--ef-yellow-bright);
+  color: #0b0d13;
+  font-weight: 700;
+}
+
+/* Timeline = contents list: serif titles, hairline rail, italic owners */
+.task-drawer .tl-line {
+  width: 1px;
+  background: var(--jr-hair);
+}
+
+.task-drawer .tl-item.status-completed .tl-line {
+  background: var(--ef-blue);
+}
+
+.task-drawer .tl-title {
+  font-family: var(--font-serif-cjk);
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--jr-ink);
+}
+
+.task-drawer .tl-item.status-skipped .tl-title {
+  color: var(--jr-ink-soft);
+}
+
+.task-drawer .tl-model {
+  padding: 0;
+  border-radius: 0;
+  background: none;
+  font-family: var(--font-display);
+  font-style: italic;
+  font-size: 12px;
+  font-weight: 400;
+  color: var(--jr-ink-soft);
+}
+
+.task-drawer .tl-meta {
+  font-family: var(--font-mono);
+  font-size: var(--fs-label-s);
+  letter-spacing: 0.06em;
+  color: var(--jr-ink-soft);
+}
+
+.task-drawer .tl-btn {
+  border: 1px solid var(--jr-hair);
+  border-radius: 0;
+  background: transparent;
+  color: var(--jr-ink-soft);
+}
+
+.task-drawer .tl-btn:hover {
+  border-color: var(--jr-rule);
+  color: var(--jr-ink);
+}
+
+/* Materials: index cards */
+.task-drawer .mat-section-title {
+  font-family: var(--font-mono);
+  font-size: var(--fs-label-s);
+  letter-spacing: 0.14em;
+  color: var(--jr-ink-soft);
+}
+
+.task-drawer .mat-card,
+.task-drawer .mat-empty,
+.task-drawer .mat-add-form {
+  border-radius: 2px;
+  border-color: var(--jr-hair);
+  background: var(--jr-paper-2);
+}
+
+.task-drawer .mat-card:hover {
+  border-color: var(--jr-rule);
+}
+
+.td-badge {
+  margin-left: 6px;
+  font-family: var(--font-mono);
+  font-size: var(--fs-label-s);
+  font-weight: 700;
+}
+
+.td-badge.is-done {
+  color: #10b981;
+}
+
+.td-badge.is-running {
+  color: var(--ef-blue);
+}
+
+/* ===== JOURNAL: top bar and composer ===== */
+.studio-topbar {
+  background: color-mix(in srgb, var(--jr-paper) 88%, transparent);
+  border-bottom: 1px solid var(--jr-rule);
+}
+
+[data-theme='dark'] .studio-topbar {
+  background: color-mix(in srgb, var(--jr-paper) 90%, transparent);
+}
+
+.studio-thread-heading {
+  font-family: var(--font-serif-cjk);
+  font-size: 14px;
+  letter-spacing: 0.04em;
+  color: var(--jr-ink);
+}
+
+/* Composer: the reply form at the foot of the page */
+.studio-composer-card {
+  background: var(--jr-grain), var(--jr-paper);
+  border: 1px solid var(--jr-hair);
+  border-top: 2px solid var(--jr-ink);
+  border-radius: 2px;
+}
+
+[data-theme='dark'] .studio-composer-card {
+  background: var(--jr-grain), var(--jr-paper);
+}
+
+.studio-composer-card::before,
+.studio-composer-card::after {
+  content: none;
+}
+
+.studio-composer-card:focus-within {
+  border-color: var(--jr-rule);
+  border-top-color: var(--ef-blue);
+}
+
+/* ===== JOURNAL: stage strip = running contents line under the top bar ===== */
+.studio-progress-inner {
+  counter-reset: jr-stage;
+  gap: 0;
+  padding-bottom: 6px;
+  border-bottom: 1px solid var(--jr-hair);
+}
+
+.stage-chip {
+  counter-increment: jr-stage;
+  gap: 4px;
+  padding: 3px 9px 3px 0;
+  border: none;
+  border-radius: 0;
+  background: none;
+  font-family: var(--font-serif-cjk);
+  font-size: 12px;
+  color: var(--jr-ink-soft);
+}
+
+.stage-chip + .stage-chip {
+  padding-left: 9px;
+  border-left: 1px solid var(--jr-hair);
+}
+
+/* The status dot becomes the step number */
+.stage-chip .stage-chip-dot {
+  display: none;
+}
+
+.stage-chip::before {
+  content: counter(jr-stage, decimal-leading-zero);
+  font-family: var(--font-display);
+  font-size: 11.5px;
+  font-weight: 700;
+  color: var(--jr-ink-soft);
+}
+
+.stage-chip:hover {
+  color: var(--jr-ink);
+}
+
+.stage-chip.status-completed {
+  color: var(--jr-ink);
+}
+
+.stage-chip.status-completed::before {
+  color: var(--ef-blue);
+}
+
+.stage-chip.status-running {
+  color: var(--jr-ink);
+  box-shadow: inset 0 -2px 0 var(--ef-blue);
+}
+
+.stage-chip.status-running::before {
+  color: var(--ef-blue);
+}
+
+/* "Needs you": highlighter-pen lemon behind the step */
+.stage-chip.status-waiting_approval {
+  color: #0b0d13;
+  background: linear-gradient(transparent 30%, var(--ef-yellow-bright) 30%, var(--ef-yellow-bright) 88%, transparent 88%);
+}
+
+.stage-chip.status-waiting_approval::before {
+  color: #0b0d13;
+}
+
+.stage-chip.status-failed,
+.stage-chip.status-failed::before {
+  color: #ef4444;
+}
+
+.stage-chip.status-skipped {
+  opacity: 0.5;
+  text-decoration: line-through;
+}
+
+/* ===== JOURNAL: inline approval = an editor's sign-off slip ===== */
+.studio-approval-card {
+  position: relative;
+  padding: 14px 16px 14px 18px;
+  background: var(--jr-grain), var(--jr-paper);
+  border: 1px solid var(--jr-hair);
+  border-left: 4px solid var(--ef-yellow-bright);
+  border-radius: 2px;
+  box-shadow: 0 10px 24px -18px rgba(15, 23, 42, 0.35);
+  color: var(--jr-ink);
+}
+
+.studio-approval-card .inline-approval-head strong {
+  font-family: var(--font-serif-cjk);
+  font-size: 16px;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+}
+
+.studio-approval-card .muted-sm {
+  font-family: var(--font-mono);
+  font-size: var(--fs-label-s);
+  letter-spacing: 0.1em;
+  color: var(--jr-ink-soft);
+}
+
+/* Remarks field written on a ruled line */
+.studio-approval-card .input {
+  border: none;
+  border-bottom: 1px solid var(--jr-rule);
+  border-radius: 0;
+  background: transparent;
+  padding-left: 0;
+  font-family: var(--font-serif-cjk);
+  color: var(--jr-ink);
+}
+
+.studio-approval-card .input:focus {
+  border-bottom-color: var(--ef-blue);
+  box-shadow: none;
+}
+
+.studio-approval-card .btn {
+  border-radius: 0;
+  border-color: var(--jr-rule);
+  background: transparent;
+  color: var(--jr-ink);
+}
+
+/* Sign-off is the one lemon action on the slip */
+.studio-approval-card .btn-ink {
+  background: var(--ef-yellow-bright);
+  border-color: var(--ef-yellow-bright);
+  color: #0b0d13;
+  font-weight: 700;
+}
+
+.studio-approval-card .btn-ink:hover {
+  filter: brightness(0.96);
+}
+
+/* Stage strip: one line, scroll sideways, fade at the edges */
+.studio-progress-inner {
+  flex-wrap: nowrap;
+  overflow-x: auto;
+  scrollbar-width: none;
+  -webkit-mask-image: linear-gradient(90deg, transparent, #000 14px, #000 calc(100% - 22px), transparent);
+  mask-image: linear-gradient(90deg, transparent, #000 14px, #000 calc(100% - 22px), transparent);
+  padding-left: 4px;
+}
+
+.studio-progress-inner::-webkit-scrollbar {
+  display: none;
+}
+
+.stage-chip {
+  flex-shrink: 0;
+  white-space: nowrap;
+}
+
+.stage-chip.status-waiting_approval {
+  background: linear-gradient(transparent 14%, var(--ef-yellow-bright) 14%, var(--ef-yellow-bright) 92%, transparent 92%);
+}
+
+/* Dock bubble opens to the right so it never covers the conversation's buttons */
+.rinne-bubble {
+  left: 0;
+  right: auto;
+  width: 138px;
+}
+
+.rinne-bubble::after {
+  left: 40px;
+  right: auto;
 }
