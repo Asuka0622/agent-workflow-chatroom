@@ -38,6 +38,25 @@ import {
 } from './store.js';
 import { normalizeTokenUsage } from './tokenEstimator.js';
 
+/**
+ * Room title from the first message: drop @mentions and a leading greeting, keep the first line.
+ * "@Claude 你好，帮我给订单列表加筛选" -> "帮我给订单列表加筛选"
+ */
+export function deriveRoomTitle(content: string): string {
+  const firstLine =
+    content
+      .split(/\r?\n/)
+      .map((l) => l.trim())
+      .find(Boolean) || '';
+  const cleaned = firstLine
+    .replace(/(^|\s)@[^\s@，,。.!！?？:：]+/g, ' ')
+    .replace(/^[\s，,。.!！~～]*(你好|您好|嗨|哈喽|hello|hi|hey)[\s，,。.!！~～]*/i, '')
+    .replace(/\s+/g, ' ')
+    .trim();
+  const title = Array.from(cleaned).slice(0, 24).join('');
+  return title || '新协作会话';
+}
+
 export class WorkflowEngine extends EventEmitter {
   private runs = new Map<string, WorkflowRun>();
   private aborters = new Map<string, AbortController>();
@@ -189,6 +208,17 @@ export class WorkflowEngine extends EventEmitter {
         return `【${tag}】\n${m.content.slice(0, 1500)}`;
       })
       .join('\n\n---\n\n');
+  }
+
+  /** Rename a room (the journal cover masthead); returns null if the room does not exist */
+  renameRun(runId: string, title: string): WorkflowRun | null {
+    const run = this.getRun(runId);
+    if (!run) return null;
+    const next = title.replace(/\s+/g, ' ').trim().slice(0, 40);
+    if (!next) return run;
+    run.title = next;
+    this.emitUpdate(run);
+    return run;
   }
 
   private emitUpdate(run: WorkflowRun, event?: Omit<RunEvent, 'id' | 'timestamp'>): void {
@@ -497,7 +527,7 @@ export class WorkflowEngine extends EventEmitter {
     if (payload.repoPath?.trim()) run.repoPath = payload.repoPath.trim();
 
     if (run.title.startsWith('协作群聊') || run.title === '公共协作群聊' || run.title === '新协作会话') {
-      run.title = effectiveContent.split(/\r?\n/)[0].slice(0, 28);
+      run.title = deriveRoomTitle(effectiveContent);
     }
 
     // Mode 1: Launch full modular workflow right inside this chatroom

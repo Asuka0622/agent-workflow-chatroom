@@ -109,6 +109,8 @@ export const api = {
     ),
 
   listRuns: () => request<{ runs: WorkflowRun[] }>('/api/runs'),
+  renameRun: (id: string, title: string) =>
+    request<{ run: WorkflowRun }>(`/api/runs/${id}`, { method: 'PATCH', body: JSON.stringify({ title }) }),
 
   createRun: (payload: CreateRunPayload) =>
     request<{ run: WorkflowRun }>('/api/runs', {

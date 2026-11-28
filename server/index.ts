@@ -830,6 +830,20 @@ export function createApp(options?: { distDir?: string; portHint?: number; host?
     res.json({ run });
   });
 
+  app.patch('/api/runs/:id', (req, res) => {
+    const { title } = (req.body || {}) as { title?: string };
+    if (typeof title !== 'string' || !title.trim()) {
+      res.status(400).json({ error: '会话名不能为空' });
+      return;
+    }
+    const run = engine.renameRun(req.params.id, title);
+    if (!run) {
+      res.status(404).json({ error: '运行记录不存在' });
+      return;
+    }
+    res.json({ run });
+  });
+
   app.delete('/api/runs/:id', (req, res) => {
     engine.abortRun(req.params.id);
     const removed = deleteRun(req.params.id);

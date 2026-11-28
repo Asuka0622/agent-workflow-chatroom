@@ -189,6 +189,11 @@ export const App: React.FC = () => {
 
   const [repoPath, setRepoPath] = useState('D:\\video');
   const [executionMode, setExecutionMode] = useState<ExecutionMode>('mock');
+  // Real mode calls paid subscriptions / APIs, so switching to it asks first
+  const [confirmRealMode, setConfirmRealMode] = useState(false);
+  // Inline room rename in the sidebar (double-click a room title)
+  const [renamingRoomId, setRenamingRoomId] = useState<string | null>(null);
+  const [roomTitleDraft, setRoomTitleDraft] = useState('');
   const [selectedTargets, setSelectedTargets] = useState<string[]>([]);
   const [input, setInput] = useState('');
   const [pendingAttachments, setPendingAttachments] = useState<ChatAttachment[]>([]);
@@ -1233,6 +1238,20 @@ export const App: React.FC = () => {
     }
   };
 
+  const commitRoomRename = async () => {
+    const id = renamingRoomId;
+    const title = roomTitleDraft.trim();
+    setRenamingRoomId(null);
+    if (!id || !title || title === runs.find((r) => r.id === id)?.title) return;
+    try {
+      const { run } = await api.renameRun(id, title);
+      setRuns((prev) => prev.map((r) => (r.id === run.id ? run : r)));
+      setActiveRun((prev) => (prev?.id === run.id ? run : prev));
+    } catch (err) {
+      flash(err instanceof Error ? err.message : String(err));
+    }
+  };
+
   const handleSend = async (mode: 'chat' | 'workflow', overrideContent?: string) => {
     const text = (overrideContent !== undefined ? overrideContent : input).trim();
     const attachmentsToSend = overrideContent !== undefined ? [] : pendingAttachments;
@@ -1281,12 +1300,17 @@ export const App: React.FC = () => {
       }
     }
 
+    // Nobody picked or mentioned: fall back to the implied targets shown under the composer
+    if (mode === 'chat' && resolvedTargets.length === 0 && impliedTargets) {
+      resolvedTargets = [...impliedTargets.ids];
+    }
+
     if (mode === 'chat' && resolvedTargets.length === 0) {
       if (activeMemberIds.length === 0) {
         flash('当前还没有已接入的成员，请先邀请模型入群或在模型池配置订阅 / API');
         setShowInvite(true);
       } else {
-        flash('请先点选下方要回复的模型胶囊，或在输入框用 @ 点名');
+        flash('有多位成员在线：请点选下方的成员，或在消息里 @ 点名');
       }
       return;
     }
@@ -1557,6 +1581,26 @@ export const App: React.FC = () => {
     return () => window.clearInterval(id);
   }, [hasStreamingWakeMsg]);
   const realMessages = messages.filter((m) => m.role !== 'system');
+
+  // Who a message goes to when nobody is picked or @-mentioned:
+  // the members who replied after your last message, else the only online member.
+  const impliedTargets: { ids: string[]; reason: 'last' | 'only' } | null = (() => {
+    if (selectedTargets.length > 0) return null;
+    const lastUserIdx = realMessages.map((m) => m.role).lastIndexOf('user');
+    if (lastUserIdx >= 0) {
+      const repliers = realMessages
+        .slice(lastUserIdx + 1)
+        .filter((m) => m.role === 'assistant' && activeMemberIds.includes(m.senderId))
+        .map((m) => m.senderId);
+      const ids = Array.from(new Set(repliers));
+      if (ids.length > 0) return { ids, reason: 'last' };
+    }
+    if (activeMemberIds.length === 1) return { ids: [...activeMemberIds], reason: 'only' };
+    return null;
+  })();
+  const impliedTargetNames = impliedTargets
+    ? impliedTargets.ids.map((id) => activeMembers.find((m) => m.id === id)?.name || id).join('、')
+    : '';
   const systemNotices = messages.filter(
     (m) => m.role === 'system' && !m.content.startsWith('欢迎来到'),
   );
@@ -1867,7 +1911,38 @@ export const App: React.FC = () => {
                     }}
                   >
                     <span className="studio-thread-no">{issueLabel(r.id)}</span>
-                    <span className="studio-thread-title">{r.title}</span>
+                    {renamingRoomId === r.id ? (
+                      <input
+                        className="studio-thread-rename"
+                        value={roomTitleDraft}
+                        autoFocus
+                        maxLength={40}
+                        onClick={(e) => e.stopPropagation()}
+                        onChange={(e) => setRoomTitleDraft(e.target.value)}
+                        onBlur={() => void commitRoomRename()}
+                        onKeyDown={(e) => {
+                          if (e.nativeEvent.isComposing) return;
+                          if (e.key === 'Enter') {
+                            e.preventDefault();
+                            void commitRoomRename();
+                          } else if (e.key === 'Escape') {
+                            setRenamingRoomId(null);
+                          }
+                        }}
+                      />
+                    ) : (
+                      <span
+                        className="studio-thread-title"
+                        title="双击改名"
+                        onDoubleClick={(e) => {
+                          e.stopPropagation();
+                          setRenamingRoomId(r.id);
+                          setRoomTitleDraft(r.title);
+                        }}
+                      >
+                        {r.title}
+                      </span>
+                    )}
                     {runs.length > 1 && (
                       <button
                         type="button"
@@ -2210,7 +2285,11 @@ export const App: React.FC = () => {
           </div>
 
           <div className="studio-topbar-right">
-            <div className="studio-segmented" role="group">
+            <div
+              className={`studio-segmented ${executionMode === 'real' ? 'is-real' : ''}`}
+              role="group"
+              title="执行模式仅对当前会话生效：模拟不调用任何模型，真实会调用你的订阅 / API"
+            >
               <button
                 type="button"
                 className={executionMode === 'mock' ? 'active' : ''}
@@ -2221,7 +2300,9 @@ export const App: React.FC = () => {
               <button
                 type="button"
                 className={executionMode === 'real' ? 'active' : ''}
-                onClick={() => setExecutionMode('real')}
+                onClick={() => {
+                  if (executionMode !== 'real') setConfirmRealMode(true);
+                }}
               >
                 真实
               </button>
@@ -2285,6 +2366,15 @@ export const App: React.FC = () => {
             </button>
           </div>
         </header>
+
+        {executionMode === 'real' && (
+          <div className="real-mode-ribbon" role="status">
+            真实模式 · 消息会调用你的订阅 / API，可能产生费用
+            <button type="button" onClick={() => setExecutionMode('mock')}>
+              切回模拟
+            </button>
+          </div>
+        )}
 
         {hasWorkflowActivity && workflow && activeRun && (
           <div className="studio-progress-strip">
@@ -3559,12 +3649,13 @@ export const App: React.FC = () => {
                     )}
                     {activeMembers.map((m) => {
                       const active = selectedTargets.includes(m.id);
+                      const implied = Boolean(impliedTargets?.ids.includes(m.id));
                       const isWorking = m.presence === 'working';
                       return (
                         <button
                           key={m.id}
                           type="button"
-                          className={`at-pill ${active ? 'active' : ''} ${isWorking ? 'is-working' : ''}`}
+                          className={`at-pill ${active ? 'active' : ''} ${implied ? 'is-implied' : ''} ${isWorking ? 'is-working' : ''}`}
                           onClick={() => handlePillClick(m.id, m.name)}
                           title={
                             active
@@ -3591,6 +3682,12 @@ export const App: React.FC = () => {
                         </button>
                       );
                     })}
+                    {impliedTargets && (
+                      <span className="send-target-hint" title="不点选、不 @ 时，消息会发给这些成员">
+                        默认发给 {impliedTargetNames}
+                        {impliedTargets.reason === 'last' ? '（上次对话）' : '（唯一在线）'}
+                      </span>
+                    )}
                   </>
                 )}
               </div>
@@ -3787,6 +3884,37 @@ export const App: React.FC = () => {
       )}
 
       {toast && <div className="toast">{toast}</div>}
+
+      {confirmRealMode && (
+        <div className="modal-backdrop" onClick={() => setConfirmRealMode(false)}>
+          <div className="modal confirm-real-modal" onClick={(e) => e.stopPropagation()}>
+            <div className="modal-header">
+              <h2>切换到真实模式？</h2>
+            </div>
+            <div className="modal-body">
+              <p>真实模式下，这个会话里发出的消息和工作流会调用你配置的订阅 CLI 或 API，可能产生费用。</p>
+              <p className="confirm-real-note">
+                只对当前会话「{activeRun?.title || '新协作会话'}」生效，随时可以切回模拟。
+              </p>
+            </div>
+            <div className="modal-footer">
+              <button type="button" className="btn btn-sm" onClick={() => setConfirmRealMode(false)}>
+                保持模拟
+              </button>
+              <button
+                type="button"
+                className="btn btn-ink btn-sm"
+                onClick={() => {
+                  setExecutionMode('real');
+                  setConfirmRealMode(false);
+                }}
+              >
+                切换到真实
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {showInvite && (
         <InviteAgentModal
